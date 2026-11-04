@@ -12,6 +12,14 @@ if(!$msbuild){throw 'Visual Studio C++ Build Tools required'}
 $sdkRoot=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
 $sdk=(Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
 if(!$sdk){throw 'A versioned Windows SDK is required'}
+& python (Join-Path $root 'tests/test_playback_contract.py')
+if($LASTEXITCODE -ne 0){throw 'Playback contract check failed'}
+& python (Join-Path $root 'tests/prepare_presentation_test.py')
+if($LASTEXITCODE -ne 0){throw 'Presentation test preparation failed'}
+& $msbuild (Join-Path $root 'tests/presentation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Presentation test build failed'}
+& (Join-Path $root 'build/presentation-tests/test_presentation.exe')
+if($LASTEXITCODE -ne 0){throw 'Presentation regression check failed'}
 & $msbuild (Join-Path $root 'tests/primary_display.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
 if($LASTEXITCODE -ne 0){throw 'Primary display test build failed'}
 & (Join-Path $root 'build/primary-display-tests/test_primary_display.exe')

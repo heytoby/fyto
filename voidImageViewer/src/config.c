@@ -48,7 +48,7 @@ BYTE config_mag_filter = CONFIG_MAG_FILTER_COLORONCOLOR; // magnify filter
 BYTE config_nav_sort = CONFIG_NAV_SORT_NAME; // current navigation sort.
 BYTE config_nav_sort_ascending = 1; // sort navigation ascending or descending.
 BYTE config_keep_aspect_ratio = 1; // stretch images with the original aspect ratio.
-BYTE config_fill_window = 0; // stretch the image to fill the window
+BYTE config_fill_window = 1; // fit the image to the selected display size
 BYTE config_fullscreen_fill_window = 1; // same as fill_window, except this setting is used when we are fullscreen
 BYTE config_auto_zoom = 0; // automatically resize the window to fit the newly loaded image
 BYTE config_auto_zoom_type = 1; // 0 = 50%, 1 = 100%, 2 = 200%
@@ -58,8 +58,8 @@ int config_auto_fit_high_mul = 3;
 int config_auto_fit_high_div = 5;
 BYTE config_frame_minus = 0; // show frame counter or remaining frames in status bar
 BYTE config_multiple_instances = 0; // all multiple instances or use a single instance.
-BYTE config_show_status = 1;
-BYTE config_show_controls = 1;
+BYTE config_show_status = 0;
+BYTE config_show_controls = 0;
 BYTE config_prevent_sleep = 1;
 BYTE config_loop_animations_once = 1;
 BYTE config_mouse_wheel_action = 1; // 0 = zoom, 1 = next/prev, 2=prev/next
@@ -86,9 +86,9 @@ BYTE config_scroll_window = 1;
 BYTE config_preload_next = 1;
 BYTE config_cache_last = 1;
 BYTE config_icm = 1;
-BYTE config_show_menu = 1;
-BYTE config_show_caption = 1;
-BYTE config_show_thickframe = 1;
+BYTE config_show_menu = 0;
+BYTE config_show_caption = 0;
+BYTE config_show_thickframe = 0;
 BYTE config_toolbar_move_window = 1;
 BYTE config_windowed_hide_cursor = 1;
 BYTE config_pixel_info = 0;
@@ -262,7 +262,10 @@ void config_load_settings(void)
         config_defaults_version=1;
     }
     if(config_defaults_version<2){config_mouse_wheel_action=1;config_nav_sort_ascending=1;config_defaults_version=2;}
+    if(config_defaults_version<3){config_fill_window=1;config_defaults_version=3;}
     // Global defaults apply on first use; loaded display flags remain authoritative.
+    config_show_status=0;
+    config_show_controls=0;
     config_show_exif=0;
 }
 

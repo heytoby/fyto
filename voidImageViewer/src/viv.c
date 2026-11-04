@@ -679,7 +679,7 @@ static BYTE _viv_fit_last_valid;
 static HMONITOR _viv_fit_monitor;
 static RECT _viv_fit_monitor_work;
 static BYTE _viv_in_sizemove,_viv_changing_frame;
-static BYTE _viv_pending_open_fullscreen, _viv_command_line_windowed;
+static BYTE _viv_user_sized_window;
 #define FYTO_REFIT_WINDOW (WM_APP+26)
 static BYTE _viv_fitting_window;
 static void _viv_fit_image_window(void);
@@ -836,8 +836,6 @@ static _viv_command_t _viv_commands[] =
 	{"Caption",MF_STRING|MF_OWNERDRAW,_VIV_MENU_VIEW,VIV_ID_VIEW_CAPTION},
 	{"Frame",MF_STRING|MF_OWNERDRAW,_VIV_MENU_VIEW,VIV_ID_VIEW_THICKFRAME},
 	{"&Menu",MF_STRING,_VIV_MENU_VIEW,VIV_ID_VIEW_MENU},
-	{"Status &Bar",MF_STRING,_VIV_MENU_VIEW,VIV_ID_VIEW_STATUS},
-	{"&Controls",MF_STRING,_VIV_MENU_VIEW,VIV_ID_VIEW_CONTROLS},
 //	{0,MF_SEPARATOR,_VIV_MENU_VIEW,0},
 	{"&Preset",MF_POPUP,_VIV_MENU_VIEW,_VIV_MENU_VIEW_PRESET},
 	{"&Minimal",MF_STRING,_VIV_MENU_VIEW_PRESET,VIV_ID_VIEW_PRESET_1},
@@ -1216,8 +1214,11 @@ static COLORREF _viv_exif_background(void){return _viv_is_fullscreen?RGB(config_
 #include "fyto_brand.h"
 #include "fyto_update.h"
 #include "titlebar.h"
+#include "viewer_geometry.h"
 #include "window_behavior.h"
 #include "primary_display.h"
+#include "hover_presentation.h"
+#include "hover_controls.h"
 #include "footer_icons.h"
 #include "footer_layout.h"
 #include "transparency_background.h"
@@ -1335,16 +1336,7 @@ static void _viv_clear_preload(void)
 	_viv_preload_fd->cFileName[0] = 0;
 }
 
-static BOOL _viv_open_from_filename_impl(const wchar_t *filename);
 static BOOL _viv_open_from_filename(const wchar_t *filename)
-{
-    BOOL result; BYTE previous=_viv_pending_open_fullscreen;
-    _viv_pending_open_fullscreen=!_viv_command_line_windowed;
-    result=_viv_open_from_filename_impl(filename);
-    if(!result)_viv_pending_open_fullscreen=previous;
-    return result;
-}
-static BOOL _viv_open_from_filename_impl(const wchar_t *filename)
 {
 	BOOL ret;
 	WIN32_FIND_DATA fd;
@@ -1964,12 +1956,12 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 			break;
 			
 		case VIV_ID_VIEW_STATUS:
-			config_show_status = !config_show_status;
+			config_show_status = 0;
 			_viv_update_frame();
 			break;
 			
 		case VIV_ID_VIEW_CONTROLS:
-			config_show_controls = !config_show_controls;
+			config_show_controls = 0;
 			_viv_update_frame();
 			break;
 			
@@ -1984,8 +1976,8 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 
 		case VIV_ID_VIEW_PRESET_3:
 			config_show_menu = 1;
-			config_show_status = 1;
-			config_show_controls = 1;
+			config_show_status = 0;
+			config_show_controls = 0;
 			config_show_caption = 1;
 			config_show_thickframe = 1;
 			_viv_update_frame();
@@ -2648,6 +2640,7 @@ static void _viv_paint_empty(HDC dc)
 
 static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+if(fyto_hover_input(hwnd,msg,wParam,lParam))return 0;
 if(fyto_window_drag(hwnd,msg,wParam,lParam))return 0;
 if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam==HTMAXBUTTON){_viv_toggle_fullscreen();return 0;}if(wParam==HTMENU){title_popup(hwnd,lParam);return 0;}if(wParam==HTCLOSE || wParam==HTMAXBUTTON || wParam==HTMINBUTTON){PostMessage(hwnd,WM_SYSCOMMAND,wParam==HTCLOSE?SC_CLOSE:wParam==HTMINBUTTON?SC_MINIMIZE:IsZoomed(hwnd)?SC_RESTORE:SC_MAXIMIZE,0);return 0;}}
 	switch (msg) 
@@ -2695,21 +2688,16 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 	
         case WM_NCHITTEST:
         {
-            RECT r;int x,y,b=MulDiv(4,os_logical_high,96),hit;
-            if(_viv_is_fullscreen){
-                hit=title_hit(hwnd,lParam);if(hit)return hit;
-                if(!config_show_caption){GetWindowRect(hwnd,&r);if(GET_Y_LPARAM(lParam)<r.top+MulDiv(28,os_logical_high,96) || (GetKeyState(VK_MENU)&0x8000))return HTCAPTION;}
-                return HTCLIENT;
-            }
-            GetWindowRect(hwnd,&r);x=GET_X_LPARAM(lParam);y=GET_Y_LPARAM(lParam);
-            if(!IsZoomed(hwnd)){
-                if(y<r.top+b)return x<r.left+b?HTTOPLEFT:x>=r.right-b?HTTOPRIGHT:HTTOP;
-                if(y>=r.bottom-b)return x<r.left+b?HTBOTTOMLEFT:x>=r.right-b?HTBOTTOMRIGHT:HTBOTTOM;
-                if(x<r.left+b)return HTLEFT;
-                if(x>=r.right-b)return HTRIGHT;
-            }
+            RECT r;POINT screen,client;int hit;
+            screen.x=GET_X_LPARAM(lParam);screen.y=GET_Y_LPARAM(lParam);
+            client=screen;ScreenToClient(hwnd,&client);
+            if(fyto_hover_play_hit(client))return HTCLIENT;
+            GetWindowRect(hwnd,&r);
+            hit=fyto_resize_hit(&r,screen,max(2,MulDiv(5,os_logical_high,96)),max(8,MulDiv(16,os_logical_high,96)));
+            if(fyto_is_resize_hit(hit))return hit;
             if(config_show_caption){hit=title_hit(hwnd,lParam);if(hit)return hit;}
-            else if(y<r.top+MulDiv(28,os_logical_high,96) || (GetKeyState(VK_MENU)&0x8000))return HTCAPTION;
+            if(!config_show_caption && (GetKeyState(VK_MENU)&0x8000))return HTCAPTION;
+            if(!config_show_caption && !_viv_frame_count && screen.y<r.top+MulDiv(28,os_logical_high,96))return HTCAPTION;
             return HTCLIENT;
         }
 
@@ -3369,6 +3357,7 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 			break;
 			
 		case WM_LBUTTONDOWN:
+            if(fyto_image_body_drag(hwnd,wParam,lParam))return 0;
             if(_viv_empty_can_open())
             {
                 RECT button = _viv_empty_open_rect();
@@ -4024,12 +4013,16 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
             _viv_in_sizemove=1;
             GetWindowRect(hwnd,&_viv_move_start_rect);
             break;
+        case WM_SIZING:
+            _viv_user_sized_window=1;
+            break;
         case WM_EXITSIZEMOVE:
             _viv_in_sizemove=0;
             if(!_viv_is_fullscreen && !IsZoomed(hwnd) && !_viv_window_arranged(hwnd)) {
                 RECT r; GetWindowRect(hwnd,&r);
                 if(r.right-r.left!=_viv_move_start_rect.right-_viv_move_start_rect.left ||
                    r.bottom-r.top!=_viv_move_start_rect.bottom-_viv_move_start_rect.top) {
+                    _viv_user_sized_window=1;
                     _viv_fit_box_wide=r.right-r.left; _viv_fit_box_high=r.bottom-r.top;
                 }
                 _viv_fit_last_rect=r; _viv_fit_last_valid=1;
@@ -4511,6 +4504,7 @@ debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
 				}
 				
                 if(!_viv_frame_count) _viv_paint_empty(ps.hdc);
+                else fyto_paint_image_hover(ps.hdc);
 				_viv_is_animation_paint = 0;
 				
 				DeleteObject(update_hrgn);
@@ -5152,7 +5146,6 @@ static void _viv_process_command_line(wchar_t *cl)
 		
 		// open the first image found (if multiple images passed).
 		// if we only specified a single image, use the single image filename.
-		_viv_command_line_windowed=start_window || start_maximized;
         if(open_filename && !set_window_rect)fyto_open_image_on_primary(_viv_hwnd);
         if ((open_filename) && (_viv_open_from_filename(open_filename)))
 		{
@@ -5170,7 +5163,6 @@ static void _viv_process_command_line(wchar_t *cl)
 		_viv_slideshow();
 	}
 	
-    _viv_command_line_windowed=0;
 	if (start_fullscreen)
 	{
 		if (!_viv_is_fullscreen)
@@ -5506,6 +5498,7 @@ static int _viv_init(int nCmdShow)
 
 static void _viv_kill(void)
 {
+    fyto_hover_presentation_destroy();
 	exif_shutdown();if(title_font){DeleteObject(title_font);title_font=NULL;}
 	_viv_show_cursor();
 
@@ -10727,6 +10720,7 @@ static void _viv_reply_clear_all(void)
 
 static void _viv_status_show(int show)
 {
+    show=0;
 	if (show)
 	{
 		if (!_viv_status_hwnd)
@@ -10758,6 +10752,7 @@ static void _viv_status_show(int show)
 
 static void _viv_controls_show(int show)
 {
+    show=0;
 	if (show)
 	{
 		if (!_viv_toolbar_hwnd)
@@ -11391,6 +11386,7 @@ static int _viv_toolbar_get_wide(void)
 
 static void _viv_toolbar_update_buttons(void)
 {
+    if(_viv_hwnd)InvalidateRect(_viv_hwnd,NULL,FALSE);
 	if (_viv_toolbar_hwnd)
 	{
 		TBBUTTONINFO tbbinfo;
@@ -13973,7 +13969,7 @@ static void _viv_preload_next(void)
 static void _viv_fit_image_window(void)
 {
     RECT r,target;MONITORINFO mi;HMONITOR monitor;fyto_image_fit_t fit;int bw,bh,x,y,changed;
-    if(!_viv_hwnd || fyto_formats_window || _viv_is_fullscreen || _viv_in_sizemove || _viv_changing_frame ||
+    if(!_viv_hwnd || fyto_formats_window || _viv_user_sized_window || _viv_is_fullscreen || _viv_in_sizemove || _viv_changing_frame ||
        !_viv_frame_count || _viv_image_wide<=0 || _viv_image_high<=0 ||
        IsZoomed(_viv_hwnd) || IsIconic(_viv_hwnd) || _viv_window_arranged(_viv_hwnd))return;
     GetWindowRect(_viv_hwnd,&r);monitor=MonitorFromWindow(_viv_hwnd,MONITOR_DEFAULTTONEAREST);
@@ -13987,8 +13983,8 @@ static void _viv_fit_image_window(void)
         _viv_fit_box_wide=r.right-r.left;_viv_fit_box_high=r.bottom-r.top;
     }
     _viv_fit_monitor=monitor;_viv_fit_monitor_work=mi.rcWork;
-    bw=min(_viv_fit_box_wide,mi.rcWork.right-mi.rcWork.left);bh=min(_viv_fit_box_high,mi.rcWork.bottom-mi.rcWork.top);
-    if(!fyto_image_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height()+_viv_get_status_high()+_viv_get_controls_high(),config_show_exif,MulDiv(340,os_logical_high,96),&fit))return;
+    bw=mi.rcWork.right-mi.rcWork.left;bh=mi.rcWork.bottom-mi.rcWork.top;
+    if(!fyto_default_display_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height(),config_show_exif,MulDiv(340,os_logical_high,96),&fit))return;
     x=(r.left+r.right-fit.window_width)/2;y=(r.top+r.bottom-fit.window_height)/2;
     x=max(mi.rcWork.left,min(x,mi.rcWork.right-fit.window_width));y=max(mi.rcWork.top,min(y,mi.rcWork.bottom-fit.window_height));
     SetRect(&target,x,y,x+fit.window_width,y+fit.window_height);
@@ -14003,10 +13999,6 @@ static void _viv_fit_image_window(void)
 
 static void _viv_start_first_frame(void)
 {
-    if(_viv_frame_count>0 && _viv_pending_open_fullscreen){
-        _viv_pending_open_fullscreen=0;
-        if(!_viv_is_fullscreen)_viv_toggle_fullscreen();
-    }
 	// draw first frame and start timer.
 	_viv_frame_position = 0;
 	_viv_frame_looped = 0;
@@ -14060,7 +14052,7 @@ static void _viv_start_first_frame(void)
 	}*/
 	
     if(!_viv_is_fullscreen && !IsZoomed(_viv_hwnd) && !IsIconic(_viv_hwnd) && !_viv_window_arranged(_viv_hwnd)) {
-        if(config_auto_zoom && config_auto_zoom_type<=3)
+        if(!_viv_user_sized_window && config_auto_zoom && config_auto_zoom_type<=3)
             _viv_command(VIV_ID_VIEW_WINDOW_SIZE_50+config_auto_zoom_type);
         _viv_fit_image_window();
     }
