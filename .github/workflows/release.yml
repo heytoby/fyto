@@ -6,6 +6,8 @@ on:
     paths:
       - voidImageViewer/src/version.h
       - .github/workflows/release.yml
+      - scripts/Build-Release.ps1
+      - voidImageViewer/installer/build-bootstrap.ps1
     tags: ['v1.0.0.*']
   workflow_dispatch:
 

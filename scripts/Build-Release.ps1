@@ -10,7 +10,8 @@ $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/v
 $msbuild=& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
 if(!$msbuild){throw 'Visual Studio C++ Build Tools required'}
 $sdkRoot=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
-$sdk=(Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
+$sdk=(Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
+if(!$sdk){throw 'A versioned Windows SDK is required'}
 & $msbuild (Join-Path $root 'voidImageViewer/vs2019/voidImageViewer.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
 if($LASTEXITCODE -ne 0){throw 'Viewer build failed'}
 $build=Join-Path $root 'build';$payload=Join-Path $build 'payload';$out=Join-Path $root 'release-assets'

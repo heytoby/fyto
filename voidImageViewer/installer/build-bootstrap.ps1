@@ -5,7 +5,8 @@ $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\v
 $vsPath=(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
 $vcRoot=(Get-ChildItem -LiteralPath (Join-Path $vsPath 'VC\Tools\MSVC') -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
 $sdkRoot='C:\Program Files (x86)\Windows Kits\10'
-$sdkVersion=(Get-ChildItem -LiteralPath "$sdkRoot\Lib" -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name
+$sdkVersion=(Get-ChildItem -LiteralPath "$sdkRoot\Lib" -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
+if(!$sdkVersion){throw 'A versioned Windows SDK is required'}
 $env:INCLUDE="$vcRoot\include;$sdkRoot\Include\$sdkVersion\ucrt;$sdkRoot\Include\$sdkVersion\shared;$sdkRoot\Include\$sdkVersion\um"
 $env:LIB="$vcRoot\lib\x64;$sdkRoot\Lib\$sdkVersion\ucrt\x64;$sdkRoot\Lib\$sdkVersion\um\x64"
 $buildDir=Join-Path (Split-Path -Parent $Msi) 'setup-build'
