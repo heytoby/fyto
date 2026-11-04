@@ -679,7 +679,9 @@ static BYTE _viv_fit_last_valid;
 static HMONITOR _viv_fit_monitor;
 static RECT _viv_fit_monitor_work;
 static BYTE _viv_in_sizemove,_viv_changing_frame;
-static BYTE _viv_user_sized_window;
+static BYTE _viv_user_sized_window,_viv_fit_for_navigation;
+static int _viv_manual_view_wide,_viv_manual_view_high;
+static void _viv_remember_manual_size(void);
 #define FYTO_REFIT_WINDOW (WM_APP+26)
 static BYTE _viv_fitting_window;
 static void _viv_fit_image_window(void);
@@ -4015,6 +4017,7 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
             break;
         case WM_SIZING:
             _viv_user_sized_window=1;
+            _viv_manual_view_wide=_viv_manual_view_high=0;
             break;
         case WM_EXITSIZEMOVE:
             _viv_in_sizemove=0;
@@ -4025,6 +4028,8 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
                     _viv_user_sized_window=1;
                     _viv_fit_box_wide=r.right-r.left; _viv_fit_box_high=r.bottom-r.top;
                 }
+                if(_viv_user_sized_window && (!_viv_manual_view_wide || !_viv_manual_view_high))
+                    _viv_remember_manual_size();
                 _viv_fit_last_rect=r; _viv_fit_last_valid=1;
             }
             _viv_fit_image_window();
@@ -5498,6 +5503,7 @@ static int _viv_init(int nCmdShow)
 
 static void _viv_kill(void)
 {
+    fyto_hover_stop();
     fyto_hover_presentation_destroy();
 	exif_shutdown();if(title_font){DeleteObject(title_font);title_font=NULL;}
 	_viv_show_cursor();
@@ -6877,11 +6883,8 @@ static void _viv_slideshow(void)
 	}
 }
 
-static void _viv_get_render_size(int *prw,int *prh)
+static void _viv_render_size_in_area(int wide,int high,int *prw,int *prh)
 {
-	RECT rect;
-	int wide;
-	int high;
 	int rw;
 	int rh;
 	int fill_window;
@@ -6896,9 +6899,7 @@ static void _viv_get_render_size(int *prw,int *prh)
 		return;
 	}
 	
-	_viv_viewport_rect(&rect);
-	wide = rect.right - rect.left;
-	high = rect.bottom - rect.top - _viv_get_status_high() - _viv_get_controls_high();
+
 	
 	if (!((wide) && (high)))
 	{
@@ -7064,6 +7065,12 @@ static void _viv_get_render_size(int *prw,int *prh)
 	
 	*prw = rw;
 	*prh = rh;
+}
+
+static void _viv_get_render_size(int *prw,int *prh)
+{
+    RECT rect;_viv_viewport_rect(&rect);
+    _viv_render_size_in_area(rect.right-rect.left,rect.bottom-rect.top-_viv_get_status_high()-_viv_get_controls_high(),prw,prh);
 }
 
 static void _viv_set_custom_rate(void)
@@ -13966,10 +13973,17 @@ static void _viv_preload_next(void)
 }
 
 // Fit the borderless window to the image, retaining a stable maximum envelope.
+static void _viv_remember_manual_size(void)
+{
+    RECT viewport;_viv_viewport_rect(&viewport);
+    _viv_manual_view_wide=max(1,viewport.right-viewport.left);
+    _viv_manual_view_high=max(1,viewport.bottom-viewport.top-_viv_get_status_high()-_viv_get_controls_high());
+}
+// Manual sizing stays free until navigation; refitting preserves that viewing area.
 static void _viv_fit_image_window(void)
 {
     RECT r,target;MONITORINFO mi;HMONITOR monitor;fyto_image_fit_t fit;int bw,bh,x,y,changed;
-    if(!_viv_hwnd || fyto_formats_window || _viv_user_sized_window || _viv_is_fullscreen || _viv_in_sizemove || _viv_changing_frame ||
+    if(!_viv_hwnd || fyto_formats_window || (_viv_user_sized_window && !_viv_fit_for_navigation) || _viv_is_fullscreen || _viv_in_sizemove || _viv_changing_frame ||
        !_viv_frame_count || _viv_image_wide<=0 || _viv_image_high<=0 ||
        IsZoomed(_viv_hwnd) || IsIconic(_viv_hwnd) || _viv_window_arranged(_viv_hwnd))return;
     GetWindowRect(_viv_hwnd,&r);monitor=MonitorFromWindow(_viv_hwnd,MONITOR_DEFAULTTONEAREST);
@@ -13984,7 +13998,16 @@ static void _viv_fit_image_window(void)
     }
     _viv_fit_monitor=monitor;_viv_fit_monitor_work=mi.rcWork;
     bw=mi.rcWork.right-mi.rcWork.left;bh=mi.rcWork.bottom-mi.rcWork.top;
-    if(!fyto_default_display_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height(),config_show_exif,MulDiv(340,os_logical_high,96),&fit))return;
+    if(_viv_user_sized_window){
+        int side,chrome=title_height()+_viv_get_status_high()+_viv_get_controls_high();
+        /* A zoomed/panned image keeps its viewport; navigation normally clears zoom. */
+        if(_viv_zoom_pos || _viv_1to1 || _viv_doing==_VIV_DOING_1TO1SCROLL)return;
+        if(!_viv_manual_view_wide || !_viv_manual_view_high)_viv_remember_manual_size();
+        _viv_render_size_in_area(_viv_manual_view_wide,_viv_manual_view_high,&fit.image_width,&fit.image_height);
+        side=config_show_exif?min(MulDiv(340,os_logical_high,96),fit.image_width):0;
+        fit.window_width=min(bw,fit.image_width+side);fit.window_height=min(bh,fit.image_height+chrome);
+        if(fit.window_width<=0 || fit.window_height<=chrome)return;
+    }else if(!fyto_default_display_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height(),config_show_exif,MulDiv(340,os_logical_high,96),&fit))return;
     x=(r.left+r.right-fit.window_width)/2;y=(r.top+r.bottom-fit.window_height)/2;
     x=max(mi.rcWork.left,min(x,mi.rcWork.right-fit.window_width));y=max(mi.rcWork.top,min(y,mi.rcWork.bottom-fit.window_height));
     SetRect(&target,x,y,x+fit.window_width,y+fit.window_height);
@@ -14054,7 +14077,9 @@ static void _viv_start_first_frame(void)
     if(!_viv_is_fullscreen && !IsZoomed(_viv_hwnd) && !IsIconic(_viv_hwnd) && !_viv_window_arranged(_viv_hwnd)) {
         if(!_viv_user_sized_window && config_auto_zoom && config_auto_zoom_type<=3)
             _viv_command(VIV_ID_VIEW_WINDOW_SIZE_50+config_auto_zoom_type);
+        _viv_fit_for_navigation=1;
         _viv_fit_image_window();
+        _viv_fit_for_navigation=0;
     }
 
 	InvalidateRect(_viv_hwnd,NULL,FALSE);

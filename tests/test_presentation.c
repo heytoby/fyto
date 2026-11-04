@@ -13,6 +13,10 @@
 
 static HWND _viv_hwnd=(HWND)(INT_PTR)1;
 static BYTE _viv_in_sizemove,_viv_changing_frame,_viv_user_sized_window,_viv_is_fullscreen;
+static BYTE _viv_fit_for_navigation,_viv_1to1,_viv_explicit_fit;
+static int _viv_manual_view_wide,_viv_manual_view_high,_viv_zoom_pos;
+static float _viv_zoom_presets[]={0.0f,1.0f};
+static int config_fullscreen_fill_window,config_fill_window,config_keep_aspect_ratio,config_allow_shrinking;
 static BYTE _viv_fullscreen_is_maxed,_viv_fit_last_valid,_viv_fitting_window;
 static RECT _viv_fit_last_rect,_viv_move_start_rect,_viv_fit_monitor_work,_viv_fullscreen_rect;
 static HMONITOR _viv_fit_monitor;
@@ -31,6 +35,8 @@ static RECT fake_window,fake_restore;
 static POINT fake_cursor;
 static MONITORINFO fake_monitor;
 static int fake_zoomed,fake_iconic,fake_arranged,moves,toggles,native_drags,last_command,capture,occluded;
+static DWORD fake_now;
+static UINT_PTR active_timer;
 #define _VIV_DOING_1TO1SCROLL 5
 #define VIV_ID_VIEW_WINDOW_SIZE_50 2000
 #define VIV_ID_SLIDESHOW_PAUSE 1005
@@ -56,7 +62,7 @@ static BOOL WINAPI fake_set_window_pos(HWND hwnd,HWND after,int x,int y,int w,in
     (void)after;(void)flags;assert(hwnd==_viv_hwnd);moves++;SetRect(&fake_window,x,y,x+w,y+h);fake_arranged=0;return TRUE;
 }
 static BOOL WINAPI fake_cursor_position(LPPOINT p){*p=fake_cursor;return TRUE;}
-static HWND WINAPI fake_window_at_point(POINT p){(void)p;return occluded?(HWND)(INT_PTR)2:_viv_hwnd;}
+static HWND WINAPI fake_window_at_point(POINT p){return occluded||!PtInRect(&fake_window,p)?(HWND)(INT_PTR)2:_viv_hwnd;}
 static BOOL WINAPI fake_screen_to_client(HWND hwnd,LPPOINT p){(void)hwnd;p->x-=fake_window.left;p->y-=fake_window.top+title_height();return TRUE;}
 static BOOL WINAPI fake_client_to_screen(HWND hwnd,LPPOINT p){(void)hwnd;p->x+=fake_window.left;p->y+=fake_window.top+title_height();return TRUE;}
 static int WINAPI fake_metrics(int index){(void)index;return 4;}
@@ -67,13 +73,12 @@ static BOOL WINAPI fake_invalidate(HWND hwnd,const RECT *r,BOOL erase){(void)hwn
 static BOOL WINAPI fake_update(HWND hwnd){(void)hwnd;return TRUE;}
 static BOOL WINAPI fake_post(HWND hwnd,UINT msg,WPARAM w,LPARAM l){(void)hwnd;(void)l;if(msg==WM_COMMAND)last_command=(int)w;return TRUE;}
 static HCURSOR WINAPI fake_set_cursor(HCURSOR c){return c;}
+static DWORD WINAPI fake_tick_count(void){return fake_now;}
+static UINT_PTR WINAPI fake_set_timer(HWND hwnd,UINT_PTR id,UINT period,TIMERPROC proc){(void)hwnd;(void)proc;assert(period==16);active_timer=id;return id;}
+static BOOL WINAPI fake_kill_timer(HWND hwnd,UINT_PTR id){(void)hwnd;if(active_timer==id)active_timer=0;return TRUE;}
 static LPWSTR * WINAPI fake_command_args(LPCWSTR text,int *count){(void)text;*count=0;return NULL;}
-static void _viv_viewport_rect(RECT *r){SetRect(r,0,0,fake_window.right-fake_window.left,fake_window.bottom-fake_window.top-title_height());}
-static void _viv_get_render_size(int *w,int *h){
-    RECT r;double s;_viv_viewport_rect(&r);s=(double)r.right/_viv_image_wide;
-    if(s>(double)r.bottom/_viv_image_high)s=(double)r.bottom/_viv_image_high;
-    *w=(int)(_viv_image_wide*s+0.5);*h=(int)(_viv_image_high*s+0.5);
-}
+static void _viv_viewport_rect(RECT *r){int w=fake_window.right-fake_window.left;SetRect(r,0,0,w-(config_show_exif?min(340,w/2):0),fake_window.bottom-fake_window.top-title_height());}
+#include "../build/render-under-test.h"
 static const wchar_t *string_get_filename_part(const wchar_t *p){const wchar_t *last=wcsrchr(p,L'\\');return last?last+1:p;}
 static unsigned long long os_get_tick_count(void){return 100;}
 static void _viv_timer_start(void){}
@@ -106,6 +111,9 @@ static void _viv_command(int id){(void)id;}
 #undef PostMessage
 #define PostMessage fake_post
 #define SetCursor fake_set_cursor
+#define GetTickCount fake_tick_count
+#define SetTimer fake_set_timer
+#define KillTimer fake_kill_timer
 #define CommandLineToArgvW fake_command_args
 #include "../voidImageViewer/src/window_behavior.h"
 #include "../voidImageViewer/src/hover_controls.h"
@@ -113,10 +121,18 @@ static void _viv_command(int id){(void)id;}
 
 static int same_rect(const RECT *a,const RECT *b){return !memcmp(a,b,sizeof(*a));}
 static int inside(const RECT *r,const RECT *b){return r->left>=b->left&&r->top>=b->top&&r->right<=b->right&&r->bottom<=b->bottom;}
+static unsigned long long contrast(const DWORD *a,const DWORD *b,int width,RECT r){
+    unsigned long long sum=0;int x,y,c;for(y=r.top;y<r.bottom;y++)for(x=r.left;x<r.right;x++)
+        for(c=0;c<3;c++)sum+=abs((int)((a[y*width+x]>>(c*8))&255)-(int)((b[y*width+x]>>(c*8))&255));
+    return sum;
+}
 static void reset(void){
     _viv_in_sizemove=_viv_changing_frame=_viv_user_sized_window=_viv_is_fullscreen=0;
     _viv_fullscreen_is_maxed=_viv_fit_last_valid=_viv_fitting_window=0;_viv_fit_monitor=NULL;
     _viv_fit_box_wide=_viv_fit_box_high=0;_viv_frame_count=1;_viv_image_wide=6000;_viv_image_high=4000;
+    _viv_manual_view_wide=_viv_manual_view_high=_viv_zoom_pos=0;
+    _viv_fit_for_navigation=_viv_1to1=_viv_explicit_fit=0;
+    config_fullscreen_fill_window=config_fill_window=config_keep_aspect_ratio=config_allow_shrinking=1;
     config_show_caption=config_show_exif=config_auto_zoom=config_auto_zoom_type=config_left_click_action=0;
     _viv_is_slideshow=_viv_doing=fyto_formats_window=0;
     SetRect(&fake_monitor.rcMonitor,0,0,2560,1440);SetRect(&fake_monitor.rcWork,0,0,2560,1392);
@@ -124,6 +140,7 @@ static void reset(void){
     fake_cursor.x=200;fake_cursor.y=200;
     fake_zoomed=fake_iconic=fake_arranged=moves=toggles=native_drags=last_command=capture=occluded=0;
     fyto_window_drag_pending=fyto_window_drag_from_image=fyto_image_hover=fyto_play_pressed=0;
+    ZeroMemory(&fyto_hover_fade,sizeof(fyto_hover_fade));fake_now=1000;active_timer=0;
     wcscpy_s(current_file.cFileName,MAX_PATH,L"Terrace-light_01.jpg");
 }
 static void save_bmp(const char *name,HDC dc,HBITMAP bitmap,int width,int height,void *pixels){
@@ -136,7 +153,7 @@ static void save_bmp(const char *name,HDC dc,HBITMAP bitmap,int width,int height
 int main(void){
     int areas[][2]={{4096,4096},{2560,1392},{1080,1872},{800,552},{3840,2120}};
     int photos[][2]={{6000,4000},{4000,6000},{512,512},{1,1},{12000,1},{1,12000}};
-    int a,p,cases=0;fyto_image_fit_t fit;RECT before,work,visible;POINT point;
+    int a,p,cases=0;fyto_image_fit_t fit;RECT before,work,visible,canvas;POINT point;
     for(a=0;a<5;a++)for(p=0;p<6;p++){
         assert(fyto_default_display_fit(areas[a][0],areas[a][1],photos[p][0],photos[p][1],0,0,0,&fit));
         assert(fit.image_width<=areas[a][0]&&fit.image_height<=areas[a][1]);
@@ -148,13 +165,33 @@ int main(void){
     reset();_viv_fit_image_window();
     assert(fake_window.right-fake_window.left==2048 && fake_window.bottom-fake_window.top==1365);cases++;
     reset();_viv_user_sized_window=1;SetRect(&fake_window,200,200,1400,660);before=fake_window;
-    for(p=0;p<4;p++){_viv_image_wide=p%2?4000:6000;_viv_image_high=p%2?6000:4000;_viv_start_first_frame();assert(same_rect(&fake_window,&before));assert(!_viv_is_fullscreen&&!toggles);}
+    _viv_fit_image_window();assert(same_rect(&fake_window,&before));
+    {
+        int rw,rh,bw,bh;_viv_get_render_size(&rw,&rh);_viv_start_first_frame();_viv_get_render_size(&bw,&bh);
+        assert(bw==rw&&bh==rh);assert(fake_window.right-fake_window.left==rw&&fake_window.bottom-fake_window.top==rh);
+        assert(_viv_manual_view_wide==1200&&_viv_manual_view_high==460);
+        for(p=0;p<20;p++){
+            _viv_image_wide=p%2?4000:6000;_viv_image_high=p%2?6000:4000;
+            _viv_render_size_in_area(1200,460,&rw,&rh);_viv_start_first_frame();_viv_get_render_size(&bw,&bh);
+            assert(rw==bw&&rh==bh);assert(fake_window.right-fake_window.left==rw&&fake_window.bottom-fake_window.top==rh);
+            assert(!_viv_is_fullscreen&&!toggles);
+        }
+    }
+    cases++;
+    reset();config_show_caption=config_show_exif=1;_viv_user_sized_window=1;SetRect(&fake_window,100,100,1500,936);
+    {
+        int rw,rh,bw,bh;_viv_get_render_size(&rw,&rh);_viv_start_first_frame();_viv_get_render_size(&bw,&bh);
+        assert(rw==bw&&rh==bh);assert(fake_window.right-fake_window.left==rw+min(340,rw));
+        assert(fake_window.bottom-fake_window.top==rh+36);
+        before=fake_window;_viv_start_first_frame();assert(same_rect(&before,&fake_window));
+    }
     cases++;
     reset();_viv_is_fullscreen=1;fake_window=fake_monitor.rcMonitor;
     fyto_window_drag_start.x=1280;fyto_window_drag_start.y=10;fyto_window_drag_origin=fake_window;
     point.x=1300;point.y=100;fyto_restore_for_drag(_viv_hwnd,point);before=fake_window;
     assert(!_viv_is_fullscreen&&_viv_user_sized_window&&toggles==1);
-    for(p=0;p<3;p++){_viv_image_wide=4000;_viv_image_high=6000;_viv_start_first_frame();assert(!_viv_is_fullscreen&&same_rect(&fake_window,&before)&&toggles==1);}
+    _viv_image_wide=4000;_viv_image_high=6000;_viv_start_first_frame();before=fake_window;
+    for(p=0;p<3;p++){_viv_start_first_frame();assert(!_viv_is_fullscreen&&same_rect(&fake_window,&before)&&toggles==1);}
     cases++;
     reset();_viv_is_fullscreen=1;fake_window=fake_monitor.rcMonitor;
     assert(fyto_image_body_drag(_viv_hwnd,MK_LBUTTON,MAKELPARAM(1280,720)));
@@ -183,11 +220,32 @@ int main(void){
     reset();SetRect(&work,0,0,1920,1080);point.x=3;point.y=1077;
     assert(fyto_resize_hit(&work,point,5,16)==HTBOTTOMLEFT);
     point.x=1916;assert(fyto_resize_hit(&work,point,5,16)==HTBOTTOMRIGHT);cases++;
+    for(a=96;a<=192;a+=48){
+        RECT title;LOGFONTW font;HFONT handle=fyto_caption_create_font(a);
+        SetRect(&work,0,0,MulDiv(960,a,96),MulDiv(640,a,96));
+        fyto_caption_filename_rect(&work,a,a,0,&title);
+        assert(title.left+title.right==work.right&&title.top==0&&title.bottom==MulDiv(36,a,96));
+        assert(GetObjectW(handle,sizeof(font),&font)==sizeof(font));assert(font.lfHeight==-MulDiv(10,a,72));
+        assert(!wcscmp(font.lfFaceName,L"Microsoft YaHei UI"));DeleteObject(handle);cases++;
+    }
+    {
+        fyto_hover_fade_t fade={0};int alpha=0,next;
+        fyto_hover_fade_to(&fade,255,1000);assert(!fyto_hover_fade_alpha(&fade,1000));
+        for(a=0;a<=140;a+=7){next=fyto_hover_fade_alpha(&fade,1000+a);assert(next>=alpha&&next<=255);alpha=next;}
+        assert(alpha==255);fyto_hover_fade_to(&fade,0,1140);
+        alpha=fyto_hover_fade_alpha(&fade,1230);assert(alpha>0&&alpha<255);
+        fyto_hover_fade_to(&fade,255,1230);assert(fyto_hover_fade_alpha(&fade,1230)==alpha);
+        assert(fyto_hover_fade_alpha(&fade,1370)==255);
+        fyto_hover_fade_to(&fade,0,1370);assert(!fyto_hover_fade_alpha(&fade,1550));cases++;
+        fyto_hover_fade_to(&fade,255,0xfffffff0UL);
+        alpha=fyto_hover_fade_alpha(&fade,54);assert(alpha>0&&alpha<255);
+        assert(fyto_hover_fade_alpha(&fade,124)==255);cases++;
+    }
 
     reset();SetRect(&fake_window,0,0,960,640);_viv_image_wide=6000;_viv_image_high=4000;
     {
         HDC dc=CreateCompatibleDC(NULL);BITMAPINFO info;HBITMAP bitmap;HGDIOBJ old;DWORD *pixels;size_t bytes=960*640*4;
-        DWORD *clean=(DWORD *)malloc(bytes);int x,y,different=0;fyto_hover_layout_t layout;
+        DWORD *clean=(DWORD *)malloc(bytes),*full=(DWORD *)malloc(bytes);int x,y,different=0;fyto_hover_layout_t layout;
         memset(&info,0,sizeof(info));info.bmiHeader.biSize=sizeof(info.bmiHeader);info.bmiHeader.biWidth=960;info.bmiHeader.biHeight=-640;
         info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;
         bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,(void **)&pixels,NULL,0);assert(bitmap&&clean);
@@ -198,17 +256,36 @@ int main(void){
         fake_cursor.x=300;fake_cursor.y=300;occluded=1;
         fyto_paint_image_hover(dc);assert(!memcmp(clean,pixels,bytes));occluded=0;cases++;
         fake_cursor.x=300;fake_cursor.y=300;fyto_paint_image_hover(dc);
+        assert(active_timer==FYTO_HOVER_FADE_TIMER);
+        for(y=0;y<80;y++)assert(!memcmp(clean+y*960,pixels+y*960,960*4));
+        fake_now+=30;point=fake_cursor;fyto_update_image_hover(point);assert(fyto_hover_fade.started==1000);
+        fake_now+=120;fyto_hover_input(_viv_hwnd,WM_TIMER,FYTO_HOVER_FADE_TIMER,0);assert(!active_timer);
+        memcpy(pixels,clean,bytes);fyto_paint_image_hover(dc);memcpy(full,pixels,bytes);
         for(y=0;y<640;y++)for(x=0;x<960;x++)if(clean[y*960+x]!=pixels[y*960+x])different++;
         assert(different>50 && different<10000);save_bmp("build/hover-preview.bmp",dc,bitmap,960,640,pixels);
-        assert(fyto_visible_image_rect(&visible));fyto_hover_layout(&visible,96,96,&layout);
+        assert(fyto_visible_image_rect(&visible));_viv_viewport_rect(&canvas);fyto_hover_layout(&visible,&canvas,96,96,&layout);
+        {
+            int left=960,right=0,top=640,bottom=0;
+            for(y=0;y<36;y++)for(x=0;x<960;x++)if(clean[y*960+x]!=pixels[y*960+x]){
+                left=min(left,x);right=max(right,x);top=min(top,y);bottom=max(bottom,y);
+            }
+            assert(right>left&&abs((left+right)-960)<=5&&abs((top+bottom)-36)<=5);cases++;
+        }
         point.x=(layout.play.left+layout.play.right)/2;point.y=(layout.play.top+layout.play.bottom)/2;
         assert(fyto_hover_input(_viv_hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(point.x,point.y)));
         assert(fyto_hover_input(_viv_hwnd,WM_LBUTTONUP,0,MAKELPARAM(point.x,point.y)));
         assert(last_command==VIV_ID_SLIDESHOW_PAUSE&&!capture);
         _viv_is_slideshow=1;memcpy(pixels,clean,bytes);fyto_paint_image_hover(dc);
         save_bmp("build/hover-playing-preview.bmp",dc,bitmap,960,640,pixels);
+        fake_cursor.x=-1;fake_cursor.y=-1;fyto_hover_input(_viv_hwnd,WM_MOUSELEAVE,0,0);fake_now+=90;
+        memcpy(pixels,clean,bytes);fyto_paint_image_hover(dc);
+        assert(contrast(pixels,clean,960,layout.filename)>0&&contrast(pixels,clean,960,layout.filename)<contrast(full,clean,960,layout.filename));
+        assert(contrast(pixels,clean,960,layout.resolution)>0&&contrast(pixels,clean,960,layout.resolution)<contrast(full,clean,960,layout.resolution));
+        assert(!contrast(pixels,clean,960,layout.play));save_bmp("build/hover-fade-preview.bmp",dc,bitmap,960,640,pixels);
+        fake_now+=90;fyto_hover_input(_viv_hwnd,WM_TIMER,FYTO_HOVER_FADE_TIMER,0);assert(!active_timer);
+        memcpy(pixels,clean,bytes);fyto_paint_image_hover(dc);assert(!memcmp(pixels,clean,bytes));cases++;
         memcpy(pixels,clean,bytes);
-        fyto_draw_hover(dc,&visible,L"Hidden filename",6000,4000,0,0,96,96);
+        fyto_draw_hover(dc,&visible,&canvas,L"Hidden filename",6000,4000,0,0,255,1,96,96);
         for(y=0;y<80;y++)assert(!memcmp(clean+y*960,pixels+y*960,960*4));
         _viv_image_wide=6000;_viv_image_high=2000;
         fake_cursor.x=300;fake_cursor.y=20;
@@ -216,10 +293,10 @@ int main(void){
         fyto_update_image_hover(fake_cursor);assert(!fyto_image_hover);
         memcpy(pixels,clean,bytes);fake_cursor.x=-1;fake_cursor.y=-1;fyto_paint_image_hover(dc);
         assert(!memcmp(clean,pixels,bytes));
-        SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);free(clean);cases++;
+        SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);free(clean);free(full);cases++;
     }
     fyto_hover_presentation_destroy();
-    printf("presentation regressions passed: %d groups; free sizing, drag/next state, hover click and offscreen rendering\n",cases);
+    printf("presentation regressions passed: %d groups; stable image size with navigation refit, centered captions, text fading, drag/next state and offscreen rendering\n",cases);
     return 0;
 }
 

@@ -6,6 +6,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>false</GenerateDebugInformation>
+      <AdditionalDependencies>msimg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)build-support;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

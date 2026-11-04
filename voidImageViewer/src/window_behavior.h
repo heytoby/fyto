@@ -38,7 +38,7 @@ static void fyto_restore_for_drag(HWND hwnd,POINT cursor)
     offset_y=max(4,min(MulDiv(24,os_logical_high,96),fyto_window_drag_start.y-fyto_window_drag_origin.top));
     target=MonitorFromPoint(cursor,MONITOR_DEFAULTTONEAREST);
     monitor.cbSize=sizeof(monitor);if(!GetMonitorInfo(target,&monitor))return;
-    _viv_user_sized_window=1;
+    _viv_user_sized_window=1;_viv_manual_view_wide=_viv_manual_view_high=0;
     _viv_in_sizemove=1;
     // A drag restores an ordinary window even if fullscreen began maximized.
     if(_viv_is_fullscreen){
@@ -77,7 +77,7 @@ static void fyto_restore_for_resize(HWND hwnd,int hit,POINT cursor)
     int width,height,x,y,left,top,right,bottom;BYTE was_moving=_viv_in_sizemove;
     monitor.cbSize=sizeof(monitor);
     if(!GetMonitorInfo(MonitorFromPoint(cursor,MONITOR_DEFAULTTONEAREST),&monitor))return;
-    _viv_user_sized_window=1;_viv_in_sizemove=1;
+    _viv_user_sized_window=1;_viv_manual_view_wide=_viv_manual_view_high=0;_viv_in_sizemove=1;
     if(_viv_is_fullscreen){
         _viv_fullscreen_is_maxed=0;_viv_toggle_fullscreen();
         if(IsZoomed(hwnd))ShowWindow(hwnd,SW_RESTORE);
@@ -110,7 +110,7 @@ static BOOL fyto_window_drag(HWND hwnd,UINT message,WPARAM buttons,LPARAM positi
 {
     if(message==WM_NCLBUTTONDOWN && fyto_is_resize_hit((int)buttons)){
         POINT cursor;cursor.x=GET_X_LPARAM(position);cursor.y=GET_Y_LPARAM(position);
-        _viv_user_sized_window=1;
+        _viv_user_sized_window=1;_viv_manual_view_wide=_viv_manual_view_high=0;
         if(_viv_is_fullscreen || IsZoomed(hwnd) || _viv_window_arranged(hwnd))
             fyto_restore_for_resize(hwnd,(int)buttons,cursor);
         return FALSE;

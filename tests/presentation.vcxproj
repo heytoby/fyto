@@ -8,7 +8,7 @@
   <PropertyGroup><OutDir>$(MSBuildThisFileDirectory)..\build\presentation-tests\</OutDir><IntDir>$(OutDir)obj\</IntDir><TargetName>test_presentation</TargetName></PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile><RuntimeLibrary>MultiThreaded</RuntimeLibrary><DebugInformationFormat>OldStyle</DebugInformationFormat><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile>
-    <Link><SubSystem>Console</SubSystem><GenerateDebugInformation>false</GenerateDebugInformation><AdditionalDependencies>gdi32.lib;user32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Link><SubSystem>Console</SubSystem><GenerateDebugInformation>false</GenerateDebugInformation><AdditionalDependencies>gdi32.lib;user32.lib;shell32.lib;msimg32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="test_presentation.c" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

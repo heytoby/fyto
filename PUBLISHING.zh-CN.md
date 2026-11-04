@@ -1,6 +1,6 @@
 # fyto 构建与发布
 
-项目仓库为 https://github.com/heytoby/fyto，当前版本为 1.0.0.31，标签为 v1.0.0.31。仓库已公开，正式发布可供软件内更新读取。
+项目仓库为 https://github.com/heytoby/fyto，当前版本为 1.0.0.32，标签为 v1.0.0.32。仓库已公开，正式发布可供软件内更新读取。
 
 ## 本地构建
 
@@ -9,7 +9,7 @@
 在 PowerShell 中运行：
 
 ```powershell
-./scripts/Set-Version.ps1 -Version 1.0.0.31
+./scripts/Set-Version.ps1 -Version 1.0.0.32
 ./scripts/Build-Release.ps1
 ```
 

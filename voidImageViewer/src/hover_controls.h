@@ -1,4 +1,7 @@
+#include "hover_animation.h"
+#define FYTO_HOVER_FADE_TIMER 0x7f32
 static BYTE fyto_image_hover,fyto_play_pressed;
+static fyto_hover_fade_t fyto_hover_fade;
 static BOOL fyto_visible_image_rect(RECT *result)
 {
     RECT viewport,image;int w,h,rw,rh,rx,ry;
@@ -13,26 +16,52 @@ static BOOL fyto_visible_image_rect(RECT *result)
     SetRect(&image,rx,ry,rx+rw,ry+rh);
     return IntersectRect(result,&image,&viewport) && !IsRectEmpty(result);
 }
+static void fyto_hover_invalidate(HWND hwnd)
+{
+    RECT image,canvas,r;fyto_hover_layout_t layout;int i;
+    if(!fyto_visible_image_rect(&image))return;
+    _viv_viewport_rect(&canvas);fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
+    for(i=0;i<3;i++){
+        r=i==0?layout.filename:i==1?layout.resolution:layout.play;
+        if(!IsRectEmpty(&r)){InflateRect(&r,1,1);InvalidateRect(hwnd,&r,FALSE);}
+    }
+}
+static void fyto_hover_target(HWND hwnd,BYTE hover)
+{
+    BYTE target=hover?255:0;
+    if(hover==fyto_image_hover && fyto_hover_fade.to==target)return;
+    fyto_image_hover=hover;
+    fyto_hover_fade_to(&fyto_hover_fade,target,GetTickCount());
+    if(fyto_hover_fade.from!=target){
+        if(!SetTimer(hwnd,FYTO_HOVER_FADE_TIMER,16,NULL))fyto_hover_fade.duration=0;
+    }else KillTimer(hwnd,FYTO_HOVER_FADE_TIMER);
+    fyto_hover_invalidate(hwnd);
+}
 static BOOL fyto_hover_play_hit(POINT point)
 {
-    RECT image;fyto_hover_layout_t layout;
+    RECT image,canvas;fyto_hover_layout_t layout;
     if(!fyto_visible_image_rect(&image) || !PtInRect(&image,point))return FALSE;
-    fyto_hover_layout(&image,os_logical_wide,os_logical_high,&layout);
+    _viv_viewport_rect(&canvas);fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
     return PtInRect(&layout.play,point);
 }
 static void fyto_update_image_hover(POINT point)
 {
     RECT image;BYTE hover=fyto_visible_image_rect(&image) && PtInRect(&image,point);
-    if(hover!=fyto_image_hover){fyto_image_hover=hover;InvalidateRect(_viv_hwnd,NULL,FALSE);}
+    fyto_hover_target(_viv_hwnd,hover);
 }
 static BOOL fyto_hover_input(HWND hwnd,UINT message,WPARAM buttons,LPARAM position)
 {
     POINT point;
+    if(message==WM_TIMER && buttons==FYTO_HOVER_FADE_TIMER){
+        if(!_viv_frame_count || _viv_in_sizemove)fyto_hover_target(hwnd,0);
+        fyto_hover_invalidate(hwnd);
+        if(fyto_hover_fade_alpha(&fyto_hover_fade,GetTickCount())==fyto_hover_fade.to)
+            KillTimer(hwnd,FYTO_HOVER_FADE_TIMER);
+        return TRUE;
+    }
     point.x=GET_X_LPARAM(position);point.y=GET_Y_LPARAM(position);
     if(message==WM_MOUSEMOVE)fyto_update_image_hover(point);
-    if(message==WM_MOUSELEAVE){
-        if(fyto_image_hover){fyto_image_hover=0;InvalidateRect(hwnd,NULL,FALSE);}
-    }
+    if(message==WM_MOUSELEAVE)fyto_hover_target(hwnd,0);
     if(message==WM_LBUTTONDOWN && fyto_hover_play_hit(point)){
         fyto_play_pressed=1;SetCapture(hwnd);return TRUE;
     }
@@ -40,28 +69,33 @@ static BOOL fyto_hover_input(HWND hwnd,UINT message,WPARAM buttons,LPARAM positi
         BOOL activate=fyto_hover_play_hit(point);
         fyto_play_pressed=0;ReleaseCapture();
         if(activate)PostMessage(hwnd,WM_COMMAND,VIV_ID_SLIDESHOW_PAUSE,0);
-        InvalidateRect(hwnd,NULL,FALSE);return TRUE;
+        fyto_hover_invalidate(hwnd);return TRUE;
     }
     if((message==WM_CAPTURECHANGED || message==WM_CANCELMODE) && fyto_play_pressed){
-        fyto_play_pressed=0;InvalidateRect(hwnd,NULL,FALSE);
+        fyto_play_pressed=0;fyto_hover_invalidate(hwnd);
     }
     if(message==WM_SETCURSOR && LOWORD(position)==HTCLIENT){
         GetCursorPos(&point);ScreenToClient(hwnd,&point);
         if(fyto_hover_play_hit(point)){SetCursor(LoadCursor(NULL,IDC_HAND));return TRUE;}
     }
-    (void)buttons;return FALSE;
+    return FALSE;
 }
 static void fyto_paint_image_hover(HDC dc)
 {
-    RECT image;POINT point;
-    if(!fyto_visible_image_rect(&image) || _viv_in_sizemove)return;
-    GetCursorPos(&point);
-    if(WindowFromPoint(point)!=_viv_hwnd){fyto_image_hover=0;return;}
-    ScreenToClient(_viv_hwnd,&point);
-    fyto_image_hover=PtInRect(&image,point);
-    if(!fyto_image_hover)return;
-    fyto_draw_hover(dc,&image,_viv_current_fd?string_get_filename_part(_viv_current_fd->cFileName):L"",
-        _viv_image_wide,_viv_image_high,!config_show_caption,_viv_is_slideshow,os_logical_wide,os_logical_high);
+    RECT image,canvas;POINT point;BYTE visible,alpha;
+    if(!fyto_visible_image_rect(&image) || _viv_in_sizemove){fyto_hover_target(_viv_hwnd,0);return;}
+    GetCursorPos(&point);visible=WindowFromPoint(point)==_viv_hwnd;
+    ScreenToClient(_viv_hwnd,&point);fyto_hover_target(_viv_hwnd,visible && PtInRect(&image,point));
+    alpha=fyto_hover_fade_alpha(&fyto_hover_fade,GetTickCount());
+    if(!alpha && !fyto_image_hover)return;
+    _viv_viewport_rect(&canvas);
+    fyto_draw_hover(dc,&image,&canvas,_viv_current_fd?string_get_filename_part(_viv_current_fd->cFileName):L"",
+        _viv_image_wide,_viv_image_high,!config_show_caption,_viv_is_slideshow,alpha,fyto_image_hover,os_logical_wide,os_logical_high);
+}
+static void fyto_hover_stop(void)
+{
+    KillTimer(_viv_hwnd,FYTO_HOVER_FADE_TIMER);ZeroMemory(&fyto_hover_fade,sizeof(fyto_hover_fade));
+    fyto_image_hover=fyto_play_pressed=0;
 }
 static BOOL fyto_image_body_drag(HWND hwnd,WPARAM buttons,LPARAM position)
 {

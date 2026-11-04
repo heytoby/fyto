@@ -4,8 +4,12 @@ root=Path(__file__).resolve().parents[1]
 source=(root/"voidImageViewer/src/viv.c").read_text(encoding="utf-8-sig")
 generated=root/"build/presentation-under-test.h"
 generated.parent.mkdir(parents=True,exist_ok=True)
-generated.write_text(body(source,"_viv_fit_image_window")+"\n\n"+body(source,"_viv_start_first_frame")+"\n",encoding="utf8")
+generated.write_text("\n\n".join(body(source,name) for name in ["_viv_remember_manual_size","_viv_fit_image_window","_viv_start_first_frame"])+"\n",encoding="utf8")
+(root/"build/render-under-test.h").write_text("\n\n".join(body(source,name) for name in ["_viv_render_size_in_area","_viv_get_render_size"])+"\n",encoding="utf8")
 assert "_viv_pending_open_fullscreen" not in source
 assert "_viv_toggle_fullscreen" not in body(source,"_viv_start_first_frame")
-print("presentation tests use the actual fit and first-frame implementations")
+title=(root/"voidImageViewer/src/titlebar.h").read_text(encoding="utf-8-sig")
+assert "fyto_caption_create_font(os_logical_high)" in title
+assert "fyto_caption_filename_rect(&bar," in title
+print("presentation tests use actual rendering size, fitting and first-frame implementations; captions share metrics")
 
