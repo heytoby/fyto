@@ -680,7 +680,7 @@ static HMONITOR _viv_fit_monitor;
 static RECT _viv_fit_monitor_work;
 static BYTE _viv_in_sizemove,_viv_changing_frame;
 static BYTE _viv_user_sized_window,_viv_fit_for_navigation;
-static int _viv_manual_view_wide,_viv_manual_view_high;
+static int _viv_manual_long_edge;
 static void _viv_remember_manual_size(void);
 #define FYTO_REFIT_WINDOW (WM_APP+26)
 static BYTE _viv_fitting_window;
@@ -4017,7 +4017,7 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
             break;
         case WM_SIZING:
             _viv_user_sized_window=1;
-            _viv_manual_view_wide=_viv_manual_view_high=0;
+            _viv_manual_long_edge=0;
             break;
         case WM_EXITSIZEMOVE:
             _viv_in_sizemove=0;
@@ -4028,7 +4028,7 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
                     _viv_user_sized_window=1;
                     _viv_fit_box_wide=r.right-r.left; _viv_fit_box_high=r.bottom-r.top;
                 }
-                if(_viv_user_sized_window && (!_viv_manual_view_wide || !_viv_manual_view_high))
+                if(_viv_user_sized_window && !_viv_manual_long_edge)
                     _viv_remember_manual_size();
                 _viv_fit_last_rect=r; _viv_fit_last_valid=1;
             }
@@ -13975,11 +13975,12 @@ static void _viv_preload_next(void)
 // Fit the borderless window to the image, retaining a stable maximum envelope.
 static void _viv_remember_manual_size(void)
 {
-    RECT viewport;_viv_viewport_rect(&viewport);
-    _viv_manual_view_wide=max(1,viewport.right-viewport.left);
-    _viv_manual_view_high=max(1,viewport.bottom-viewport.top-_viv_get_status_high()-_viv_get_controls_high());
+    int rw,rh;
+    if(!_viv_frame_count || _viv_image_wide<=0 || _viv_image_high<=0){_viv_manual_long_edge=FYTO_DEFAULT_LONG_EDGE;return;}
+    _viv_get_render_size(&rw,&rh);
+    _viv_manual_long_edge=max(1,max(rw,rh));
 }
-// Manual sizing stays free until navigation; refitting preserves that viewing area.
+// Manual sizing stays free until navigation; refitting preserves its image long edge.
 static void _viv_fit_image_window(void)
 {
     RECT r,target;MONITORINFO mi;HMONITOR monitor;fyto_image_fit_t fit;int bw,bh,x,y,changed;
@@ -13999,14 +14000,11 @@ static void _viv_fit_image_window(void)
     _viv_fit_monitor=monitor;_viv_fit_monitor_work=mi.rcWork;
     bw=mi.rcWork.right-mi.rcWork.left;bh=mi.rcWork.bottom-mi.rcWork.top;
     if(_viv_user_sized_window){
-        int side,chrome=title_height()+_viv_get_status_high()+_viv_get_controls_high();
-        /* A zoomed/panned image keeps its viewport; navigation normally clears zoom. */
+        /* Preserve a single image long edge, independent of the next aspect ratio. */
         if(_viv_zoom_pos || _viv_1to1 || _viv_doing==_VIV_DOING_1TO1SCROLL)return;
-        if(!_viv_manual_view_wide || !_viv_manual_view_high)_viv_remember_manual_size();
-        _viv_render_size_in_area(_viv_manual_view_wide,_viv_manual_view_high,&fit.image_width,&fit.image_height);
-        side=config_show_exif?min(MulDiv(340,os_logical_high,96),fit.image_width):0;
-        fit.window_width=min(bw,fit.image_width+side);fit.window_height=min(bh,fit.image_height+chrome);
-        if(fit.window_width<=0 || fit.window_height<=chrome)return;
+        if(!_viv_manual_long_edge)_viv_remember_manual_size();
+        if(!fyto_long_edge_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height(),config_show_exif,
+            MulDiv(340,os_logical_high,96),_viv_manual_long_edge,&fit))return;
     }else if(!fyto_default_display_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height(),config_show_exif,MulDiv(340,os_logical_high,96),&fit))return;
     x=(r.left+r.right-fit.window_width)/2;y=(r.top+r.bottom-fit.window_height)/2;
     x=max(mi.rcWork.left,min(x,mi.rcWork.right-fit.window_width));y=max(mi.rcWork.top,min(y,mi.rcWork.bottom-fit.window_height));

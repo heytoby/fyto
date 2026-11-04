@@ -24,9 +24,18 @@ static BYTE fyto_window_drag_pending,fyto_window_drag_from_image;
 static POINT fyto_window_drag_start;
 static RECT fyto_window_drag_origin;
 
+static BOOL fyto_window_needs_drag_restore(HWND hwnd)
+{
+    RECT r;MONITORINFO monitor;int tolerance=max(2,MulDiv(2,os_logical_high,96));
+    if(_viv_is_fullscreen || IsZoomed(hwnd) || _viv_window_arranged(hwnd))return TRUE;
+    monitor.cbSize=sizeof(monitor);
+    if(!GetWindowRect(hwnd,&r) || !GetMonitorInfo(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST),&monitor))return FALSE;
+    return r.right-r.left>=monitor.rcWork.right-monitor.rcWork.left-tolerance ||
+        r.bottom-r.top>=monitor.rcWork.bottom-monitor.rcWork.top-tolerance;
+}
 static void fyto_restore_for_drag(HWND hwnd,POINT cursor)
 {
-    RECT normal;MONITORINFO monitor;HMONITOR target;
+    RECT normal;MONITORINFO monitor;HMONITOR target;fyto_image_fit_t fit;
     int width,height,x,y,offset_y;double horizontal,vertical;
     BYTE was_moving=_viv_in_sizemove;
     horizontal=(double)(fyto_window_drag_start.x-fyto_window_drag_origin.left)/
@@ -38,28 +47,23 @@ static void fyto_restore_for_drag(HWND hwnd,POINT cursor)
     offset_y=max(4,min(MulDiv(24,os_logical_high,96),fyto_window_drag_start.y-fyto_window_drag_origin.top));
     target=MonitorFromPoint(cursor,MONITOR_DEFAULTTONEAREST);
     monitor.cbSize=sizeof(monitor);if(!GetMonitorInfo(target,&monitor))return;
-    _viv_user_sized_window=1;_viv_manual_view_wide=_viv_manual_view_high=0;
-    _viv_in_sizemove=1;
-    // A drag restores an ordinary window even if fullscreen began maximized.
+    _viv_user_sized_window=1;_viv_manual_long_edge=FYTO_DEFAULT_LONG_EDGE;_viv_in_sizemove=1;
     if(_viv_is_fullscreen){
-        _viv_fullscreen_is_maxed=0;
-        _viv_toggle_fullscreen();
-        if(IsZoomed(hwnd))ShowWindow(hwnd,SW_RESTORE);
-        GetWindowRect(hwnd,&normal);
-    }else{
-        WINDOWPLACEMENT placement;placement.length=sizeof(placement);
-        GetWindowRect(hwnd,&normal);
-        if(IsZoomed(hwnd)){
-            ShowWindow(hwnd,SW_RESTORE);GetWindowRect(hwnd,&normal);
-        }else{
-            if(_viv_fit_last_valid)normal=_viv_fit_last_rect;
-            else if(GetWindowPlacement(hwnd,&placement))normal=placement.rcNormalPosition;
-            ShowWindow(hwnd,SW_RESTORE);
-        }
+        _viv_fullscreen_is_maxed=0;_viv_toggle_fullscreen();
     }
-    width=min(normal.right-normal.left,(monitor.rcWork.right-monitor.rcWork.left)*9/10);
-    height=min(normal.bottom-normal.top,(monitor.rcWork.bottom-monitor.rcWork.top)*9/10);
-    if(width<=0 || height<=0){fyto_empty_window_rect(&normal,&monitor.rcWork);width=normal.right-normal.left;height=normal.bottom-normal.top;}
+    if(IsZoomed(hwnd))ShowWindow(hwnd,SW_RESTORE);
+    else if(_viv_window_arranged(hwnd))ShowWindow(hwnd,SW_RESTORE);
+    /* Restoring from a screen-filling view starts from the default display scale. */
+    _viv_zoom_pos=0;_viv_1to1=_viv_explicit_fit=_viv_have_old_zoom=0;
+    _viv_dst_zoom_x_pos=_viv_dst_zoom_y_pos=_VIV_DST_ZOOM_ONE;
+    _viv_dst_pos_x=_viv_dst_pos_y=500;_viv_view_x=_viv_view_y=0;_viv_view_ix=_viv_view_iy=0.0;
+    if(_viv_frame_count && fyto_default_display_fit(monitor.rcWork.right-monitor.rcWork.left,
+        monitor.rcWork.bottom-monitor.rcWork.top,_viv_image_wide,_viv_image_high,title_height(),
+        config_show_exif,MulDiv(340,os_logical_high,96),&fit)){
+        width=fit.window_width;height=fit.window_height;
+    }else{
+        fyto_empty_window_rect(&normal,&monitor.rcWork);width=normal.right-normal.left;height=normal.bottom-normal.top;
+    }
     if(fyto_window_drag_from_image)offset_y=(int)(height*vertical);
     x=cursor.x-(int)(width*horizontal);y=cursor.y-offset_y;
     x=max(monitor.rcWork.left,min(x,monitor.rcWork.right-width));
@@ -77,7 +81,7 @@ static void fyto_restore_for_resize(HWND hwnd,int hit,POINT cursor)
     int width,height,x,y,left,top,right,bottom;BYTE was_moving=_viv_in_sizemove;
     monitor.cbSize=sizeof(monitor);
     if(!GetMonitorInfo(MonitorFromPoint(cursor,MONITOR_DEFAULTTONEAREST),&monitor))return;
-    _viv_user_sized_window=1;_viv_manual_view_wide=_viv_manual_view_high=0;_viv_in_sizemove=1;
+    _viv_user_sized_window=1;_viv_manual_long_edge=0;_viv_in_sizemove=1;
     if(_viv_is_fullscreen){
         _viv_fullscreen_is_maxed=0;_viv_toggle_fullscreen();
         if(IsZoomed(hwnd))ShowWindow(hwnd,SW_RESTORE);
@@ -110,12 +114,12 @@ static BOOL fyto_window_drag(HWND hwnd,UINT message,WPARAM buttons,LPARAM positi
 {
     if(message==WM_NCLBUTTONDOWN && fyto_is_resize_hit((int)buttons)){
         POINT cursor;cursor.x=GET_X_LPARAM(position);cursor.y=GET_Y_LPARAM(position);
-        _viv_user_sized_window=1;_viv_manual_view_wide=_viv_manual_view_high=0;
+        _viv_user_sized_window=1;_viv_manual_long_edge=0;
         if(_viv_is_fullscreen || IsZoomed(hwnd) || _viv_window_arranged(hwnd))
             fyto_restore_for_resize(hwnd,(int)buttons,cursor);
         return FALSE;
     }
-    if(message==WM_NCLBUTTONDOWN && buttons==HTCAPTION && (_viv_is_fullscreen || IsZoomed(hwnd) || _viv_window_arranged(hwnd))){
+    if(message==WM_NCLBUTTONDOWN && buttons==HTCAPTION && fyto_window_needs_drag_restore(hwnd)){
         fyto_window_drag_start.x=GET_X_LPARAM(position);fyto_window_drag_start.y=GET_Y_LPARAM(position);
         GetWindowRect(hwnd,&fyto_window_drag_origin);
         fyto_window_drag_pending=1;SetCapture(hwnd);return TRUE;

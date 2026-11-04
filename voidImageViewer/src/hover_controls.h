@@ -102,13 +102,16 @@ static BOOL fyto_image_body_drag(HWND hwnd,WPARAM buttons,LPARAM position)
     POINT client,screen;RECT viewport;int rw,rh;
     if(!_viv_frame_count || (buttons&(MK_CONTROL|MK_SHIFT)))return FALSE;
     if(config_left_click_action!=0 && config_left_click_action!=6)return FALSE;
-    if(config_show_caption && !_viv_is_fullscreen)return FALSE;
     client.x=GET_X_LPARAM(position);client.y=GET_Y_LPARAM(position);
+    if(config_show_caption && !_viv_is_fullscreen &&
+        !(client.y>=0 && client.y<MulDiv(36,os_logical_high,96) && fyto_window_needs_drag_restore(hwnd)))return FALSE;
     if(fyto_hover_play_hit(client))return FALSE;
     _viv_viewport_rect(&viewport);_viv_get_render_size(&rw,&rh);
     rw=(int)(rw*_viv_dst_zoom_values[_viv_dst_zoom_x_pos]);
     rh=(int)(rh*_viv_dst_zoom_values[_viv_dst_zoom_y_pos]);
-    if(rw>viewport.right-viewport.left || rh>viewport.bottom-viewport.top)return FALSE;
+    if((rw>viewport.right-viewport.left || rh>viewport.bottom-viewport.top) &&
+        !(client.y>=viewport.top && client.y<viewport.top+MulDiv(36,os_logical_high,96) &&
+          fyto_window_needs_drag_restore(hwnd)))return FALSE;
     screen=client;ClientToScreen(hwnd,&screen);
     fyto_window_drag_from_image=1;
     if(!fyto_window_drag(hwnd,WM_NCLBUTTONDOWN,HTCAPTION,MAKELPARAM(screen.x,screen.y))){

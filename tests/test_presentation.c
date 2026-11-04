@@ -13,8 +13,9 @@
 
 static HWND _viv_hwnd=(HWND)(INT_PTR)1;
 static BYTE _viv_in_sizemove,_viv_changing_frame,_viv_user_sized_window,_viv_is_fullscreen;
-static BYTE _viv_fit_for_navigation,_viv_1to1,_viv_explicit_fit;
-static int _viv_manual_view_wide,_viv_manual_view_high,_viv_zoom_pos;
+static BYTE _viv_fit_for_navigation,_viv_1to1,_viv_explicit_fit,_viv_have_old_zoom;
+static int _viv_manual_long_edge,_viv_zoom_pos;
+static double _viv_view_ix,_viv_view_iy;
 static float _viv_zoom_presets[]={0.0f,1.0f};
 static int config_fullscreen_fill_window,config_fill_window,config_keep_aspect_ratio,config_allow_shrinking;
 static BYTE _viv_fullscreen_is_maxed,_viv_fit_last_valid,_viv_fitting_window;
@@ -38,6 +39,7 @@ static int fake_zoomed,fake_iconic,fake_arranged,moves,toggles,native_drags,last
 static DWORD fake_now;
 static UINT_PTR active_timer;
 #define _VIV_DOING_1TO1SCROLL 5
+#define _VIV_DST_ZOOM_ONE 0
 #define VIV_ID_VIEW_WINDOW_SIZE_50 2000
 #define VIV_ID_SLIDESHOW_PAUSE 1005
 #define debug_printf(...) ((void)0)
@@ -130,8 +132,10 @@ static void reset(void){
     _viv_in_sizemove=_viv_changing_frame=_viv_user_sized_window=_viv_is_fullscreen=0;
     _viv_fullscreen_is_maxed=_viv_fit_last_valid=_viv_fitting_window=0;_viv_fit_monitor=NULL;
     _viv_fit_box_wide=_viv_fit_box_high=0;_viv_frame_count=1;_viv_image_wide=6000;_viv_image_high=4000;
-    _viv_manual_view_wide=_viv_manual_view_high=_viv_zoom_pos=0;
-    _viv_fit_for_navigation=_viv_1to1=_viv_explicit_fit=0;
+    _viv_manual_long_edge=_viv_zoom_pos=0;
+    _viv_fit_for_navigation=_viv_1to1=_viv_explicit_fit=_viv_have_old_zoom=0;
+    _viv_dst_pos_x=_viv_dst_pos_y=500;_viv_dst_zoom_x_pos=_viv_dst_zoom_y_pos=0;
+    _viv_view_x=_viv_view_y=0;_viv_view_ix=_viv_view_iy=0.0;
     config_fullscreen_fill_window=config_fill_window=config_keep_aspect_ratio=config_allow_shrinking=1;
     config_show_caption=config_show_exif=config_auto_zoom=config_auto_zoom_type=config_left_click_action=0;
     _viv_is_slideshow=_viv_doing=fyto_formats_window=0;
@@ -157,22 +161,21 @@ int main(void){
     for(a=0;a<5;a++)for(p=0;p<6;p++){
         assert(fyto_default_display_fit(areas[a][0],areas[a][1],photos[p][0],photos[p][1],0,0,0,&fit));
         assert(fit.image_width<=areas[a][0]&&fit.image_height<=areas[a][1]);
-        assert(fit.image_width<=2048&&fit.image_height<=2048);
-        if(a==0)assert(max(fit.image_width,fit.image_height)==2048);
+        assert(max(fit.image_width,fit.image_height)==min(1980,min(areas[a][0],areas[a][1])));
         cases++;
     }
     assert(!fyto_default_display_fit(100,36,10,10,36,0,0,&fit));
     reset();_viv_fit_image_window();
-    assert(fake_window.right-fake_window.left==2048 && fake_window.bottom-fake_window.top==1365);cases++;
+    assert(fake_window.right-fake_window.left==1392 && fake_window.bottom-fake_window.top==928);cases++;
     reset();_viv_user_sized_window=1;SetRect(&fake_window,200,200,1400,660);before=fake_window;
     _viv_fit_image_window();assert(same_rect(&fake_window,&before));
     {
         int rw,rh,bw,bh;_viv_get_render_size(&rw,&rh);_viv_start_first_frame();_viv_get_render_size(&bw,&bh);
         assert(bw==rw&&bh==rh);assert(fake_window.right-fake_window.left==rw&&fake_window.bottom-fake_window.top==rh);
-        assert(_viv_manual_view_wide==1200&&_viv_manual_view_high==460);
+        assert(_viv_manual_long_edge==690);
         for(p=0;p<20;p++){
             _viv_image_wide=p%2?4000:6000;_viv_image_high=p%2?6000:4000;
-            _viv_render_size_in_area(1200,460,&rw,&rh);_viv_start_first_frame();_viv_get_render_size(&bw,&bh);
+            rw=p%2?460:690;rh=p%2?690:460;_viv_start_first_frame();_viv_get_render_size(&bw,&bh);
             assert(rw==bw&&rh==bh);assert(fake_window.right-fake_window.left==rw&&fake_window.bottom-fake_window.top==rh);
             assert(!_viv_is_fullscreen&&!toggles);
         }
@@ -184,8 +187,31 @@ int main(void){
         assert(rw==bw&&rh==bh);assert(fake_window.right-fake_window.left==rw+min(340,rw));
         assert(fake_window.bottom-fake_window.top==rh+36);
         before=fake_window;_viv_start_first_frame();assert(same_rect(&before,&fake_window));
+        _viv_image_wide=4000;_viv_image_high=6000;_viv_start_first_frame();_viv_get_render_size(&bw,&bh);
+        assert(max(bw,bh)==max(rw,rh));assert(fake_window.right-fake_window.left==bw+min(340,bw));
+        assert(fake_window.bottom-fake_window.top==bh+36);
     }
     cases++;
+    reset();_viv_frame_count=_viv_image_wide=_viv_image_high=0;_viv_remember_manual_size();
+    assert(_viv_manual_long_edge==1980);cases++;
+    /* Fresh normal windows use the same 1980 long edge for every orientation. */
+    for(p=0;p<3;p++){
+        int rw,rh;reset();SetRect(&fake_monitor.rcMonitor,0,0,3840,2160);SetRect(&fake_monitor.rcWork,0,0,3840,2120);
+        _viv_image_wide=p==0?6000:4000;_viv_image_high=p==1?6000:4000;
+        _viv_start_first_frame();_viv_get_render_size(&rw,&rh);
+        assert(max(rw,rh)==1980&&inside(&fake_window,&fake_monitor.rcWork));cases++;
+    }
+    /* Small screens use a common limit, including a portrait desktop. */
+    for(a=0;a<2;a++){
+        int first=0;reset();if(a)SetRect(&fake_monitor.rcWork,0,0,1080,1872);
+        for(p=0;p<2;p++){
+            int rw,rh;_viv_image_wide=p?4000:6000;_viv_image_high=p?6000:4000;
+            _viv_start_first_frame();_viv_get_render_size(&rw,&rh);
+            if(!p)first=max(rw,rh);else assert(max(rw,rh)==first);
+            assert(inside(&fake_window,&fake_monitor.rcWork));
+        }
+        cases++;
+    }
     reset();_viv_is_fullscreen=1;fake_window=fake_monitor.rcMonitor;
     fyto_window_drag_start.x=1280;fyto_window_drag_start.y=10;fyto_window_drag_origin=fake_window;
     point.x=1300;point.y=100;fyto_restore_for_drag(_viv_hwnd,point);before=fake_window;
@@ -217,6 +243,42 @@ int main(void){
         assert(!fake_zoomed&&!fake_arranged&&_viv_user_sized_window);
         before=fake_window;_viv_start_first_frame();assert(same_rect(&fake_window,&before));cases++;
     }
+    /* Fullscreen, maximized, snapped and height/width-filled ordinary windows. */
+    for(a=0;a<5;a++)for(p=0;p<2;p++){
+        int rw,rh;reset();SetRect(&fake_monitor.rcMonitor,0,0,3840,2160);SetRect(&fake_monitor.rcWork,0,0,3840,2120);
+        _viv_image_wide=p?4000:6000;_viv_image_high=p?6000:4000;
+        _viv_is_fullscreen=a==0;fake_zoomed=a==1;fake_arranged=a==2;
+        if(a==3)SetRect(&fake_window,400,0,1600,2120);
+        else if(a==4)SetRect(&fake_window,0,200,3840,1200);
+        else fake_window=fake_monitor.rcWork;
+        before=fake_window;assert(fyto_window_needs_drag_restore(_viv_hwnd));
+        point.x=(fake_window.left+fake_window.right)/2;point.y=fake_window.top+18;
+        assert(fyto_window_drag(_viv_hwnd,WM_NCLBUTTONDOWN,HTCAPTION,MAKELPARAM(point.x,point.y)));
+        assert(same_rect(&before,&fake_window));
+        assert(fyto_window_drag(_viv_hwnd,WM_LBUTTONUP,0,0));assert(same_rect(&before,&fake_window));
+        assert(fyto_window_drag(_viv_hwnd,WM_NCLBUTTONDOWN,HTCAPTION,MAKELPARAM(point.x,point.y)));
+        point.x+=12;point.y+=80;ScreenToClient(_viv_hwnd,&point);
+        assert(fyto_window_drag(_viv_hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(point.x,point.y)));
+        _viv_get_render_size(&rw,&rh);
+        assert(max(rw,rh)==1980&&_viv_manual_long_edge==1980);
+        assert(!_viv_is_fullscreen&&!fake_zoomed&&!fake_arranged&&native_drags==1);
+        assert(inside(&fake_window,&fake_monitor.rcWork));
+        _viv_image_wide=p?6000:4000;_viv_image_high=p?4000:6000;
+        _viv_start_first_frame();_viv_get_render_size(&rw,&rh);assert(max(rw,rh)==1980&&!_viv_is_fullscreen);cases++;
+    }
+    for(p=0;p<2;p++){
+        int rw,rh;reset();config_show_caption=p;
+        SetRect(&fake_monitor.rcMonitor,0,0,3840,2160);SetRect(&fake_monitor.rcWork,0,0,3840,2120);
+        _viv_is_fullscreen=!p;fake_zoomed=p;fake_window=fake_monitor.rcMonitor;
+        _viv_zoom_pos=1;_viv_have_old_zoom=1;_viv_view_x=120;
+        assert(!fyto_image_body_drag(_viv_hwnd,MK_LBUTTON,MAKELPARAM(1800,900)));
+        assert(fyto_image_body_drag(_viv_hwnd,MK_LBUTTON,MAKELPARAM(1800,20)));
+        assert(fyto_window_drag(_viv_hwnd,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(1810,100)));
+        _viv_get_render_size(&rw,&rh);assert(max(rw,rh)==1980&&!_viv_zoom_pos&&!_viv_have_old_zoom&&!_viv_view_x);cases++;
+    }
+    reset();_viv_manual_long_edge=700;assert(!fyto_window_needs_drag_restore(_viv_hwnd));
+    assert(!fyto_window_drag(_viv_hwnd,WM_NCLBUTTONDOWN,HTCAPTION,MAKELPARAM(400,110)));
+    assert(_viv_manual_long_edge==700&&!capture);cases++;
     reset();SetRect(&work,0,0,1920,1080);point.x=3;point.y=1077;
     assert(fyto_resize_hit(&work,point,5,16)==HTBOTTOMLEFT);
     point.x=1916;assert(fyto_resize_hit(&work,point,5,16)==HTBOTTOMRIGHT);cases++;
@@ -296,7 +358,7 @@ int main(void){
         SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);free(clean);free(full);cases++;
     }
     fyto_hover_presentation_destroy();
-    printf("presentation regressions passed: %d groups; stable image size with navigation refit, centered captions, text fading, drag/next state and offscreen rendering\n",cases);
+    printf("presentation regressions passed: %d groups; unified long-edge sizing, 1980 drag restore, navigation refit, centered captions, text fading and offscreen rendering\n",cases);
     return 0;
 }
 
