@@ -1,0 +1,65 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="fyto 中文版" Manufacturer="fyto Community" Version="1.0.29" UpgradeCode="A9C96FF0-C5C9-41CD-BF19-E0E825F7E76B" Language="2052" Codepage="936" Scope="perMachine" InstallerVersion="500">
+    <MajorUpgrade Schedule="afterInstallExecute" DowngradeErrorMessage="已安装较新版本。" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" />
+    <Property Id="ARPPRODUCTICON" Value="FytoIcon22" />
+    <Icon Id="FytoIcon22" SourceFile="..\res\voidImageViewer.ico" />
+    <Property Id="OLDVIEW" Secure="yes" />
+    <Property Id="OLDINSTALLDIR" Secure="yes" />
+    <Property Id="REINSTALLMODE" Value="amus" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="fyto-banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="fyto-dialog.bmp" />
+    <StandardDirectory Id="DesktopFolder" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="fyto">
+        <Component Id="ViewerProgram" Guid="A198F19E-3D34-44C6-ABAA-8E21D62FE87D" Bitness="always64">
+          <File Id="ViewerExe" Source="$(var.Payload)\fyto.exe" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="Software\RegisteredApplications" Name="fyto" Type="string" Value="Software\fyto\Capabilities" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities" Name="ApplicationName" Type="string" Value="fyto" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities" Name="ApplicationDescription" Type="string" Value="fyto image viewer" />
+          <RegistryValue Root="HKLM" Key="Software\Classes\fyto.Image" Type="string" Value="fyto Image" />
+          <RegistryValue Root="HKLM" Key="Software\Classes\fyto.Image\shell\open\command" Type="string" Value="&quot;[#ViewerExe]&quot; &quot;%1&quot;" />
+          <RegistryValue Root="HKLM" Key="Software\Classes\fyto.Image\DefaultIcon" Type="string" Value="[#ViewerExe],0" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".jpg" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".jpeg" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".png" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".webp" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".gif" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".bmp" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".tif" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".tiff" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".ico" Type="string" Value="fyto.Image" />
+          <RegistryValue Root="HKLM" Key="Software\fyto\Capabilities\FileAssociations" Name=".arw" Type="string" Value="fyto.Image" />
+
+          <RegistryValue Root="HKLM" Key="Software\fyto" Name="InstallLocation" Type="string" Value="[INSTALLFOLDER]" />
+          <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\fyto.exe" Type="string" Value="[#ViewerExe]" />
+          <RegistryValue Root="HKLM" Key="Software\Classes\Applications\fyto.exe\shell\open\command" Type="string" Value="&quot;[#ViewerExe]&quot; &quot;%1&quot;" />
+          <Shortcut Id="ViewerStartMenu" Directory="ProgramMenuFolder" Name="fyto 中文版" Advertise="yes" Icon="FytoIcon22" />
+          <Shortcut Id="ViewerDesktop" Directory="DesktopFolder" Name="fyto" Target="[#ViewerExe]" WorkingDirectory="INSTALLFOLDER" Icon="FytoIcon22" />
+        </Component>
+        <Component Id="Legacy64" Guid="A9ED14C7-7D91-4296-9A91-0F6D78FC37D9" Bitness="always64" Condition="OLDVIEW=64 AND INSTALLFOLDER~=OLDINSTALLDIR">
+          <RemoveRegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\fyto" Action="removeOnInstall" />
+        </Component>
+        <Component Id="Legacy32" Guid="C65BB5E7-EC20-4A64-A61B-4A42C612AF07" Bitness="always32" Condition="OLDVIEW=32 AND INSTALLFOLDER~=OLDINSTALLDIR">
+          <RemoveRegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\fyto" Action="removeOnInstall" />
+        </Component>
+        <Component Id="DefaultIni" Guid="BA640731-90A4-4C4C-9239-E492041B72AE" NeverOverwrite="yes" Permanent="yes" Bitness="always64">
+          <File Id="SettingsIni" Source="installed-defaults.ini" Name="fyto.ini" KeyPath="yes" />
+        </Component>
+        <Component Id="Notices" Guid="1DD4501B-0DF0-414E-83F2-D616FD72567A" Bitness="always64">
+          <File Source="$(var.Payload)\LICENSE" KeyPath="yes" />
+          <File Source="$(var.Payload)\libwebp-COPYING" />
+          <File Source="$(var.Payload)\libwebp-PATENTS" />
+          <File Source="$(var.Payload)\README.txt" />
+          <File Source="$(var.Payload)\NOTICE.txt" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Main" Title="fyto" Level="1">
+      <ComponentRef Id="ViewerProgram" /><ComponentRef Id="DefaultIni" /><ComponentRef Id="Notices" /><ComponentRef Id="Legacy64" /><ComponentRef Id="Legacy32" />
+    </Feature>
+  </Package>
+</Wix>

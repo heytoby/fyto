@@ -1,0 +1,9 @@
+{
+  "version": "1.0.21",
+  "license_intro": "fyto Chinese intro verified in MSI Control table",
+  "upstream_copyright": "preserved",
+  "MIT_and_WebP_terms": "preserved",
+  "branded_bitmaps": "embedded",
+  "bootstrap_verify": 0,
+  "full_install": "not executed"
+}

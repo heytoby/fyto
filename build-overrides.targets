@@ -1,0 +1,17 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+      <AdditionalOptions>%(AdditionalOptions) /utf-8</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+    </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)build-support;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  <Target Name="BuildFytoUpdater" BeforeTargets="ResourceCompile">
+    <Exec Command="&quot;$(WINDIR)\Microsoft.NET\Framework64\v4.0.30319\csc.exe&quot; /nologo /target:winexe /optimize+ /platform:x64 /codepage:65001 /r:System.Net.Http.dll /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:&quot;$(MSBuildThisFileDirectory)voidImageViewer\res\fyto-updater.exe&quot; &quot;$(MSBuildThisFileDirectory)voidImageViewer\updater\UpdateClient.cs&quot;" />
+  </Target>
+</Project>

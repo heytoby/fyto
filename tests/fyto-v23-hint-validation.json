@@ -1,0 +1,7 @@
+{
+  "empty_hint": "four visible lines including 1/A/Esc; redundant heading absent",
+  "key1": "standard/minimal toggle passed",
+  "keyA": "EXIF open/close visibly changes sidebar",
+  "Esc": "clean exit",
+  "saved_custom_colors": "window and fullscreen custom values retained"
+}

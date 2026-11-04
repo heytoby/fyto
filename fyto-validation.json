@@ -1,0 +1,552 @@
+{
+  "version": "1.0.0.28",
+  "window_behavior": {
+    "version": "1.0.0.28",
+    "empty_views": [
+      {
+        "work": [
+          2560,
+          252,
+          3640,
+          2124
+        ],
+        "window": [
+          2620,
+          888,
+          3580,
+          1488
+        ]
+      },
+      {
+        "work": [
+          0,
+          0,
+          2560,
+          1392
+        ],
+        "window": [
+          800,
+          396,
+          1760,
+          996
+        ]
+      },
+      {
+        "work": [
+          3640,
+          0,
+          4664,
+          720
+        ],
+        "window": [
+          3691,
+          72,
+          4612,
+          647
+        ]
+      }
+    ],
+    "fullscreen_drags": [
+      {
+        "minimal": false,
+        "from": [
+          3640,
+          0,
+          4664,
+          768
+        ],
+        "restored": [
+          3742,
+          70,
+          4663,
+          598
+        ]
+      },
+      {
+        "minimal": true,
+        "from": [
+          3640,
+          0,
+          4664,
+          768
+        ],
+        "restored": [
+          3742,
+          70,
+          4663,
+          530
+        ]
+      }
+    ],
+    "split_and_maximized_drags": [
+      {
+        "minimal": true,
+        "maximized": false,
+        "from": [
+          2560,
+          252,
+          3100,
+          2124
+        ],
+        "restored": [
+          2560,
+          342,
+          3480,
+          802
+        ]
+      },
+      {
+        "minimal": true,
+        "maximized": true,
+        "from": [
+          2552,
+          244,
+          3648,
+          2132
+        ],
+        "restored": [
+          2889,
+          334,
+          3429,
+          604
+        ]
+      },
+      {
+        "minimal": false,
+        "maximized": false,
+        "from": [
+          2560,
+          252,
+          3100,
+          2124
+        ],
+        "restored": [
+          2706,
+          342,
+          3110,
+          612
+        ]
+      },
+      {
+        "minimal": false,
+        "maximized": true,
+        "from": [
+          2552,
+          244,
+          3648,
+          2132
+        ],
+        "restored": [
+          2889,
+          334,
+          3429,
+          672
+        ]
+      }
+    ]
+  },
+  "image_fitting": {
+    "version": "1.0.0.28",
+    "geometry_matrix": 2560,
+    "monitors": [
+      {
+        "handle": 65641,
+        "monitor": [
+          0,
+          0,
+          2560,
+          1440
+        ],
+        "work": [
+          0,
+          0,
+          2560,
+          1392
+        ]
+      },
+      {
+        "handle": 131073,
+        "monitor": [
+          2560,
+          252,
+          3640,
+          2172
+        ],
+        "work": [
+          2560,
+          252,
+          3640,
+          2124
+        ]
+      },
+      {
+        "handle": 65643,
+        "monitor": [
+          3640,
+          0,
+          4664,
+          768
+        ],
+        "work": [
+          3640,
+          0,
+          4664,
+          720
+        ]
+      }
+    ],
+    "monitor_checks": [
+      {
+        "monitor": [
+          0,
+          0,
+          2560,
+          1440
+        ],
+        "work": [
+          0,
+          0,
+          2560,
+          1392
+        ],
+        "photos": [
+          {
+            "image": "1-landscape.png",
+            "window": [
+              4,
+              4,
+              2564,
+              1352
+            ],
+            "image_area": [
+              2560,
+              1280
+            ]
+          },
+          {
+            "image": "2-portrait.png",
+            "window": [
+              953,
+              0,
+              1615,
+              1392
+            ],
+            "image_area": [
+              662,
+              1324
+            ]
+          },
+          {
+            "image": "3-panorama.png",
+            "window": [
+              0,
+              342,
+              2560,
+              1050
+            ],
+            "image_area": [
+              2560,
+              640
+            ]
+          },
+          {
+            "image": "4-square.png",
+            "window": [
+              618,
+              0,
+              1942,
+              1392
+            ],
+            "image_area": [
+              1324,
+              1324
+            ]
+          },
+          {
+            "image": "3-panorama.png",
+            "window": [
+              0,
+              342,
+              2560,
+              1050
+            ],
+            "image_area": [
+              2560,
+              640
+            ]
+          },
+          {
+            "image": "2-portrait.png",
+            "window": [
+              949,
+              0,
+              1611,
+              1392
+            ],
+            "image_area": [
+              662,
+              1324
+            ]
+          },
+          {
+            "image": "1-landscape.png",
+            "window": [
+              0,
+              22,
+              2560,
+              1370
+            ],
+            "image_area": [
+              2560,
+              1280
+            ]
+          }
+        ],
+        "fullscreen_on_this_monitor": true,
+        "no_cumulative_shrink": true
+      },
+      {
+        "monitor": [
+          2560,
+          252,
+          3640,
+          2172
+        ],
+        "work": [
+          2560,
+          252,
+          3640,
+          2124
+        ],
+        "photos": [
+          {
+            "image": "1-landscape.png",
+            "window": [
+              2560,
+              626,
+              3640,
+              1234
+            ],
+            "image_area": [
+              1080,
+              540
+            ]
+          },
+          {
+            "image": "2-portrait.png",
+            "window": [
+              2649,
+              252,
+              3551,
+              2124
+            ],
+            "image_area": [
+              902,
+              1804
+            ]
+          },
+          {
+            "image": "3-panorama.png",
+            "window": [
+              2560,
+              1019,
+              3640,
+              1357
+            ],
+            "image_area": [
+              1080,
+              270
+            ]
+          },
+          {
+            "image": "4-square.png",
+            "window": [
+              2560,
+              614,
+              3640,
+              1762
+            ],
+            "image_area": [
+              1080,
+              1080
+            ]
+          },
+          {
+            "image": "3-panorama.png",
+            "window": [
+              2560,
+              1019,
+              3640,
+              1357
+            ],
+            "image_area": [
+              1080,
+              270
+            ]
+          },
+          {
+            "image": "2-portrait.png",
+            "window": [
+              2649,
+              252,
+              3551,
+              2124
+            ],
+            "image_area": [
+              902,
+              1804
+            ]
+          },
+          {
+            "image": "1-landscape.png",
+            "window": [
+              2560,
+              884,
+              3640,
+              1492
+            ],
+            "image_area": [
+              1080,
+              540
+            ]
+          }
+        ],
+        "fullscreen_on_this_monitor": true,
+        "no_cumulative_shrink": true
+      },
+      {
+        "monitor": [
+          3640,
+          0,
+          4664,
+          768
+        ],
+        "work": [
+          3640,
+          0,
+          4664,
+          720
+        ],
+        "photos": [
+          {
+            "image": "1-landscape.png",
+            "window": [
+              3640,
+              18,
+              4664,
+              598
+            ],
+            "image_area": [
+              1024,
+              512
+            ]
+          },
+          {
+            "image": "2-portrait.png",
+            "window": [
+              3989,
+              0,
+              4315,
+              720
+            ],
+            "image_area": [
+              326,
+              652
+            ]
+          },
+          {
+            "image": "3-panorama.png",
+            "window": [
+              3640,
+              198,
+              4664,
+              522
+            ],
+            "image_area": [
+              1024,
+              256
+            ]
+          },
+          {
+            "image": "4-square.png",
+            "window": [
+              3826,
+              0,
+              4478,
+              720
+            ],
+            "image_area": [
+              652,
+              652
+            ]
+          },
+          {
+            "image": "3-panorama.png",
+            "window": [
+              3640,
+              198,
+              4664,
+              522
+            ],
+            "image_area": [
+              1024,
+              256
+            ]
+          },
+          {
+            "image": "2-portrait.png",
+            "window": [
+              3989,
+              0,
+              4315,
+              720
+            ],
+            "image_area": [
+              326,
+              652
+            ]
+          },
+          {
+            "image": "1-landscape.png",
+            "window": [
+              3640,
+              70,
+              4664,
+              650
+            ],
+            "image_area": [
+              1024,
+              512
+            ]
+          }
+        ],
+        "fullscreen_on_this_monitor": true,
+        "no_cumulative_shrink": true
+      }
+    ],
+    "startup": "fullscreen by default; no modal format prompt",
+    "fixed_windows": "half and two-thirds placements retain their rectangle through navigation and mode changes",
+    "minimal": "same image fitting applies in minimal mode; chrome-only toggle retains its outer rectangle",
+    "source_images": "unchanged"
+  },
+  "installer": {
+    "version": "1.0.28",
+    "license_intro": "fyto Chinese intro verified in MSI Control table",
+    "upstream_copyright": "preserved",
+    "MIT_and_WebP_terms": "preserved",
+    "branded_bitmaps": "embedded",
+    "bootstrap_verify": 0,
+    "full_install": "not executed",
+    "desktop_shortcut": "present",
+    "shortcut_icons": "new versioned rectangular logo resource verified byte-for-byte",
+    "viewer_version": "1.0.0.28",
+    "fresh_install_background": "windowed and fullscreen RGB 28,28,28",
+    "upgrade_schedule": "old product removed after new components registered",
+    "post_install": "optional setup entry, no forced format dialog"
+  },
+  "scope": "landscape empty setup window; drag restoration from fullscreen, snapped and maximized states",
+  "native_input_validation": "synthetic non-client/client drag messages with Windows move-loop handoff; physical pointer edge Snap was not automated",
+  "regression_inputs": "WM_COMMAND navigation and mode actions avoid active desktop keyboard-state dependence",
+  "full_install": "not executed",
+  "online_upgrade_installation": "not executed; GitHub stable release required"
+}

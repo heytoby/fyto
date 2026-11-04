@@ -1,0 +1,4 @@
+#include <assert.h>
+#include <stdio.h>
+#include "../voidImageViewer/src/footer_layout.h"
+int main(void){int widths[]={160,320,480,800,1100,1920},dpis[]={96,120,144,192},i,j,status,controls,cases=0;for(i=0;i<6;i++)for(j=0;j<4;j++)for(status=0;status<=1;status++)for(controls=0;controls<=1;controls++){int w=widths[i],d=dpis[j],expected=controls?(32*d+48)/96:status?(24*d+48)/96:0;viv_footer_layout_t r=viv_footer_layout(w,760,d,d,status,controls,(180*d+48)/96);assert(r.height==expected);assert(r.y+r.height==760);assert(r.info_x+r.info_width==w);assert(r.tools_x>=0);if(controls)assert(r.tools_x*2+r.tools_width>=w-1 && r.tools_x*2+r.tools_width<=w);assert(r.tools_x+r.tools_width<=r.info_x);if(status&&controls){assert(r.height==(32*d+48)/96);assert(r.info_width<=w/2);assert(r.tools_width>0);}cases++;}printf("PASS %d layouts: one shared row, no overlap, narrow windows and 100-200%% DPI\n",cases);return 0;}

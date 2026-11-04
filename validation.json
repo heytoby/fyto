@@ -1,0 +1,9 @@
+{
+  "viewer_version": "1.0.0.19",
+  "build": "MSVC Release x64 static CRT",
+  "window_tests": "passed",
+  "footer_layout_cases": 96,
+  "installer_self_check": "passed",
+  "full_install_test": "blocked: MSI service error 1601",
+  "native_shell_snap_test": "not automated"
+}

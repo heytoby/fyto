@@ -1,0 +1,39 @@
+{
+  "version": "1.0.0.24",
+  "msi_version": "1.0.24",
+  "product_code": "{8E5926FE-3EA8-465D-AA5E-95F1F39F0991}",
+  "cabinet_files_extracted_and_matched": 7,
+  "upgrade_code_unchanged": true,
+  "desktop_shortcut_preserved": true,
+  "permanent_ini_preserved": true,
+  "upgrade_remove_previous_sequence": 6501,
+  "embedded_msi_matches": true,
+  "full_install": "not executed; Windows runtime unavailable",
+  "installer_sha256": "7651e756c9b934ff699360cfc66bc0f21a5284f3b32e0aa1c86c7b2f854e3bc1",
+  "unchanged_installer_tables": [
+    "Shortcut",
+    "Component",
+    "Registry",
+    "Feature",
+    "FeatureComponents",
+    "Directory",
+    "Icon",
+    "Media"
+  ],
+  "license_version_and_original_terms_verified": true,
+  "exe_version": "1.0.0.24",
+  "windows_dlls_only": [
+    "ADVAPI32.dll",
+    "COMCTL32.dll",
+    "comdlg32.dll",
+    "GDI32.dll",
+    "KERNEL32.dll",
+    "msvcrt.dll",
+    "ole32.dll",
+    "SHELL32.dll",
+    "SHLWAPI.dll",
+    "USER32.dll"
+  ],
+  "exe_sha256": "dcba07375dbaa9c7f890dc9222ecb4e0731671394d422f59eb96289289fb7af8",
+  "known_gui_limit": "No usable Windows desktop in current environment. Wine initialization fails before app start (local socket denied)."
+}

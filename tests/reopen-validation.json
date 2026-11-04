@@ -1,0 +1,72 @@
+{
+  "version": "1.0.0.17",
+  "same_photo_reopens": [
+    [
+      800,
+      533
+    ],
+    [
+      800,
+      533
+    ],
+    [
+      800,
+      533
+    ],
+    [
+      800,
+      533
+    ],
+    [
+      800,
+      533
+    ],
+    [
+      800,
+      533
+    ]
+  ],
+  "alternating_reopens": [
+    [
+      800,
+      533
+    ],
+    [
+      400,
+      600
+    ],
+    [
+      800,
+      533
+    ],
+    [
+      400,
+      600
+    ],
+    [
+      800,
+      533
+    ],
+    [
+      400,
+      600
+    ]
+  ],
+  "manual_resize_reopens": [
+    [
+      900,
+      600
+    ],
+    [
+      900,
+      600
+    ],
+    [
+      900,
+      600
+    ]
+  ],
+  "window_regressions": "passed",
+  "installer_verify": 0,
+  "full_install": "not tested; prior environment MSI service error1601"
+}

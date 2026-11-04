@@ -1,0 +1,14 @@
+[
+  {
+    "fullscreen": false,
+    "toggles": 6,
+    "hover": "no client artifacts",
+    "dropdown": "opened/cancelled"
+  },
+  {
+    "fullscreen": true,
+    "toggles": 6,
+    "hover": "no client artifacts",
+    "dropdown": "opened/cancelled"
+  }
+]

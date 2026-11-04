@@ -1,0 +1,80 @@
+{
+  "version": "1.0.0.22",
+  "icon_checks": [
+    {
+      "slot": 32,
+      "background": [
+        48,
+        64,
+        80
+      ],
+      "visible_bounds": [
+        4,
+        9,
+        28,
+        23
+      ]
+    },
+    {
+      "slot": 32,
+      "background": [
+        224,
+        216,
+        208
+      ],
+      "visible_bounds": [
+        4,
+        9,
+        28,
+        23
+      ]
+    },
+    {
+      "slot": 16,
+      "background": [
+        48,
+        64,
+        80
+      ],
+      "visible_bounds": [
+        2,
+        4,
+        14,
+        11
+      ]
+    },
+    {
+      "slot": 16,
+      "background": [
+        224,
+        216,
+        208
+      ],
+      "visible_bounds": [
+        2,
+        4,
+        14,
+        11
+      ]
+    }
+  ],
+  "menu_logo": "absent in wide and compact menu layouts; first menu hit target passed",
+  "about": {
+    "image_display": [
+      480,
+      360
+    ],
+    "source_image": [
+      2048,
+      1535
+    ],
+    "mean_pixel_difference": [
+      0.07405092592592592,
+      0.07405092592592592,
+      0.07405092592592592
+    ],
+    "source_credits": "retained",
+    "reopen_cycles": 2
+  },
+  "licenses": "full MIT and WebP notices open inside the app"
+}

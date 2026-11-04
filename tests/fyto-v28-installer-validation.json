@@ -1,0 +1,15 @@
+{
+  "version": "1.0.28",
+  "license_intro": "fyto Chinese intro verified in MSI Control table",
+  "upstream_copyright": "preserved",
+  "MIT_and_WebP_terms": "preserved",
+  "branded_bitmaps": "embedded",
+  "bootstrap_verify": 0,
+  "full_install": "not executed",
+  "desktop_shortcut": "present",
+  "shortcut_icons": "new versioned rectangular logo resource verified byte-for-byte",
+  "viewer_version": "1.0.0.28",
+  "fresh_install_background": "windowed and fullscreen RGB 28,28,28",
+  "upgrade_schedule": "old product removed after new components registered",
+  "post_install": "optional setup entry, no forced format dialog"
+}

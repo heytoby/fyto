@@ -1,0 +1,51 @@
+{
+  "version": "1.0.0.25",
+  "mode_cycles": [
+    {
+      "state": "normal",
+      "outer_rectangle": [
+        80,
+        80,
+        1040,
+        780
+      ],
+      "cycles": 4
+    },
+    {
+      "state": "maximized",
+      "outer_rectangle": [
+        -8,
+        -8,
+        2568,
+        1400
+      ],
+      "cycles": 3
+    },
+    {
+      "state": "half-screen rectangle",
+      "outer_rectangle": [
+        0,
+        0,
+        800,
+        900
+      ],
+      "cycles": 1
+    },
+    {
+      "state": "fullscreen",
+      "outer_rectangle": [
+        0,
+        0,
+        2560,
+        1440
+      ],
+      "cycles": 1
+    }
+  ],
+  "first_use": "standard mode; optional empty-view entry; no modal startup prompt",
+  "restart_mode": "minimal retained twice, standard retained after switching back",
+  "formats": "native one-click all selects ten checkboxes; saved mask restored; /setup never forces modal re-selection; main rectangle unchanged",
+  "sample": "internal 16x16 confirmation sample exits before creating a viewer; current image/rectangle retained",
+  "source_photo": "hash unchanged",
+  "preference_storage": "isolated portable associations.ini; user registry unchanged"
+}

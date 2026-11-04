@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0.23",
+  "cases": [
+    "1-transparent-black.png",
+    "2-palette.png",
+    "3-semi.png",
+    "4-opaque-rgb.png",
+    "5-opaque-rgba.png",
+    "6-color.png",
+    "5-opaque-rgba.png",
+    "4-opaque-rgb.png",
+    "3-semi.png",
+    "2-palette.png",
+    "1-transparent-black.png"
+  ],
+  "fullscreen": "transparent black text visible; default #1C1C1C outside image",
+  "source_files": "unchanged hashes",
+  "opaque_pixels": "exact RGB retained",
+  "alpha": "RGBA and indexed PNG transparency, semitransparent black/white verified",
+  "default_background": "both modes RGB 28,28,28"
+}

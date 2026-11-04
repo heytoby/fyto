@@ -1,0 +1,10 @@
+[
+  "Open image click opens file chooser",
+  "empty: responsive, rendered, clean exit",
+  "test.png: responsive, rendered, clean exit",
+  "test.jpg: responsive, rendered, clean exit",
+  "test.webp: responsive, rendered, clean exit",
+  "test.gif: responsive, rendered, clean exit",
+  "missing.png: responsive, rendered, clean exit",
+  "broken.jpg: responsive, rendered, clean exit"
+]

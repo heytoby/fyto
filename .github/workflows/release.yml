@@ -1,0 +1,57 @@
+name: Build and publish fyto
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - voidImageViewer/src/version.h
+      - .github/workflows/release.yml
+    tags: ['v1.0.0.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fyto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $header = Get-Content ./voidImageViewer/src/version.h -Raw
+          $parts = @('MAJOR','MINOR','REVISION','BUILD') | ForEach-Object { [int][regex]::Match($header, ('VERSION_' + $_ + '\s+(\d+)')).Groups[1].Value }
+          $tag = 'v' + ($parts -join '.')
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) { throw 'Tag and source version differ' }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          "exists=$($LASTEXITCODE -eq 0)".ToLowerInvariant() >> $env:GITHUB_OUTPUT
+          $global:LASTEXITCODE = 0
+      - name: Build and verify release assets
+        if: steps.version.outputs.exists != 'true'
+        shell: pwsh
+        run: ./scripts/Build-Release.ps1
+      - name: Publish release
+        if: steps.version.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FYTO_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = Get-ChildItem ./release-assets -File | Select-Object -ExpandProperty FullName
+          if ($assets.Count -ne 4) { throw 'Expected installer, installer ZIP, source ZIP, and SHA256SUMS.txt' }
+          gh release create $env:FYTO_TAG @assets --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --latest --title "fyto $($env:FYTO_TAG)" --notes-file RELEASE_NOTES.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

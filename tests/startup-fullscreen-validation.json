@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0.18",
+  "startup_cases": 18,
+  "legacy_sizes": "64x64, 300x600, 800x200 ignored on startup",
+  "fullscreen_key1_toggles": 4,
+  "native_restore": "passed from maximized with legacy 64x64 settings",
+  "mouse_drag": "blocked: SetCursorPos unavailable in execution desktop",
+  "window_regressions": "passed",
+  "setup_verify": 0,
+  "full_install": "not executed"
+}

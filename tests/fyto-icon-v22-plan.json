@@ -1,0 +1,124 @@
+{
+  "source_sha256": "f0de65616b8223e2db698e3510d9944589f40c26579046da390344def48d9915",
+  "source_size": [
+    740,
+    435
+  ],
+  "icon": "res/voidImageViewer.ico",
+  "visible_width_fraction": 0.75,
+  "original_pixels": "proportional resampling only, original background retained",
+  "canvas": "transparent",
+  "menu_logo": "removed",
+  "frames": [
+    {
+      "slot": 16,
+      "visible": [
+        12,
+        7
+      ],
+      "offset": [
+        2,
+        4
+      ]
+    },
+    {
+      "slot": 20,
+      "visible": [
+        15,
+        9
+      ],
+      "offset": [
+        2,
+        5
+      ]
+    },
+    {
+      "slot": 24,
+      "visible": [
+        18,
+        11
+      ],
+      "offset": [
+        3,
+        6
+      ]
+    },
+    {
+      "slot": 32,
+      "visible": [
+        24,
+        14
+      ],
+      "offset": [
+        4,
+        9
+      ]
+    },
+    {
+      "slot": 40,
+      "visible": [
+        30,
+        18
+      ],
+      "offset": [
+        5,
+        11
+      ]
+    },
+    {
+      "slot": 48,
+      "visible": [
+        36,
+        21
+      ],
+      "offset": [
+        6,
+        13
+      ]
+    },
+    {
+      "slot": 64,
+      "visible": [
+        48,
+        28
+      ],
+      "offset": [
+        8,
+        18
+      ]
+    },
+    {
+      "slot": 96,
+      "visible": [
+        72,
+        42
+      ],
+      "offset": [
+        12,
+        27
+      ]
+    },
+    {
+      "slot": 128,
+      "visible": [
+        96,
+        56
+      ],
+      "offset": [
+        16,
+        36
+      ]
+    },
+    {
+      "slot": 256,
+      "visible": [
+        192,
+        113
+      ],
+      "offset": [
+        32,
+        71
+      ]
+    }
+  ]
+}

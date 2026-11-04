@@ -1,0 +1,8 @@
+[
+  "preload 0: landscape/portrait/square resize and reverse navigation passed",
+  "native caption drag hit target and pan area passed; left drag retains window position",
+  "maximized navigation retained geometry; whole-window toolbar center passed",
+  "preload 1: landscape/portrait/square resize and reverse navigation passed",
+  "native caption drag hit target and pan area passed; left drag retains window position",
+  "maximized navigation retained geometry; whole-window toolbar center passed"
+]

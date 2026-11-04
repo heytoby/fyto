@@ -1,0 +1,13 @@
+{
+  "state_scenarios": 1032,
+  "legacy_ini_and_marker_do_not_suppress": true,
+  "normal_startup_once": true,
+  "forced_upgrade_and_manual_reopen": true,
+  "saved_masks": 1024,
+  "saved_empty_mask_preserved": true,
+  "failed_writes_retryable": true,
+  "installer_success_launch_wired": true,
+  "single_instance_forwarding_wired": true,
+  "windows_settings_page_not_launched": true,
+  "runtime_note": "State tests use actual source functions with mocked registry/controls; native Windows GUI and OS default changes not executed."
+}

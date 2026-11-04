@@ -1,0 +1,45 @@
+{
+  "bootstrap_verify_exit": 0,
+  "setup_bytes": 546304,
+  "product": {
+    "ProductName": "voidImageViewer 中文版",
+    "ProductVersion": "1.0.16",
+    "ProductCode": "{2B9A57BE-00F7-4CE9-AE11-1187DC230863}",
+    "ProductLanguage": "2052"
+  },
+  "preserve_config": true,
+  "old_version_registry_migration": true,
+  "full_install_test": "blocked by Windows Installer service error 1601",
+  "files": [
+    [
+      "ViewerExe",
+      "530432",
+      "1.0.0.16"
+    ],
+    [
+      "SettingsIni",
+      "40",
+      ""
+    ],
+    [
+      "filZc32FZODtW6b6NO6fzkp81ZDd8A",
+      "2588",
+      ""
+    ],
+    [
+      "filb_CbTY0PbJVKGl.dEtSjOSPKZbc",
+      "1496",
+      ""
+    ],
+    [
+      "filtt1.Kp263b6HZV6sHi31.d628YA",
+      "1436",
+      ""
+    ],
+    [
+      "filZsPTcbQImpRaIOT8yZ1sIi6NnrI",
+      "1170",
+      ""
+    ]
+  ]
+}
