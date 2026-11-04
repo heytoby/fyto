@@ -1,0 +1,5 @@
+fyto is an independently modified version of void Image Viewer.
+Original project: https://github.com/voidtools/voidImageViewer
+Copyright 2025 voidtools / David Carpenter. MIT License.
+The complete original LICENSE and WebP COPYING/PATENTS accompany this distribution.
+Branding, Chinese localization, EXIF sidebar and interface changes are part of this derived version.

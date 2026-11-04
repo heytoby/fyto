@@ -1,0 +1,24 @@
+void Image Viewer 1.0.0.15 简体中文源码副本
+
+本次仅添加中文界面与语言选择，保留英文和原有功能。
+
+语言切换
+打开 查看 → 设置 → 常规，在语言下拉框选择简体中文或 English，点击确定。
+默认使用简体中文，选择保存到原有 voidImageViewer.ini 的 language 项。
+language=0 为英文，language=1 为简体中文。
+点击取消不会更改语言。确定后菜单、工具栏提示与状态提示更新；再次打开设置时显示所选语言。
+Windows 提供的系统对话框和系统菜单遵循 Windows 的语言设置。
+
+修改范围
+src/viv.c：界面文本接入翻译、设置中读取和应用语言。
+src/l10n.h：中文翻译表和对话框文字翻译。
+src/config.c、src/config.h：语言配置读写。
+res/resource.h、res/voidImageViewer.rc：常规页增加语言选择。
+translations.zh-CN.json：可读的中英文对照表。
+原有命令表、键位标识、图像处理代码、第三方库和授权文件均保留。
+
+构建与验证
+使用原有 vs2019/voidImageViewer.sln，需 Visual Studio C++、v142 工具集及 Windows SDK。
+本次已检查菜单与资源文字覆盖、格式参数、文件筛选规则、配置提交位置以及新增 C 模块语法。
+当前环境未安装 C++ 编译器与 Windows SDK，尚未完成 Windows 编译和运行界面检查。
+此压缩包是源码，不包含已编译的 EXE。
