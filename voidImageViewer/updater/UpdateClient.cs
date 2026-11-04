@@ -49,7 +49,7 @@ internal sealed class UpdateClient : Form {
                 if(next==null) throw new IOException("更新服务器返回了无效重定向。");
                 current=Trusted(new Uri(current,next).AbsoluteUri); continue;
             }
-            if(code==404) { response.Dispose(); throw new IOException("GitHub 尚未发布可用的正式版本，请稍后再试。"); }
+            if(code==404) { response.Dispose(); throw new IOException("无法访问更新发布。请确认仓库已公开且已发布正式版本。"); }
             response.EnsureSuccessStatusCode();return response;
         }
         throw new IOException("下载重定向次数过多。");

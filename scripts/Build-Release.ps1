@@ -12,6 +12,10 @@ if(!$msbuild){throw 'Visual Studio C++ Build Tools required'}
 $sdkRoot=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
 $sdk=(Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
 if(!$sdk){throw 'A versioned Windows SDK is required'}
+& $msbuild (Join-Path $root 'tests/primary_display.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Primary display test build failed'}
+& (Join-Path $root 'build/primary-display-tests/test_primary_display.exe')
+if($LASTEXITCODE -ne 0){throw 'Primary display regression check failed'}
 & $msbuild (Join-Path $root 'voidImageViewer/vs2019/voidImageViewer.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
 if($LASTEXITCODE -ne 0){throw 'Viewer build failed'}
 $build=Join-Path $root 'build';$payload=Join-Path $build 'payload';$out=Join-Path $root 'release-assets'

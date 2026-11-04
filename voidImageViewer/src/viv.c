@@ -1217,6 +1217,7 @@ static COLORREF _viv_exif_background(void){return _viv_is_fullscreen?RGB(config_
 #include "fyto_update.h"
 #include "titlebar.h"
 #include "window_behavior.h"
+#include "primary_display.h"
 #include "footer_icons.h"
 #include "footer_layout.h"
 #include "transparency_background.h"
@@ -5152,6 +5153,7 @@ static void _viv_process_command_line(wchar_t *cl)
 		// open the first image found (if multiple images passed).
 		// if we only specified a single image, use the single image filename.
 		_viv_command_line_windowed=start_window || start_maximized;
+        if(open_filename && !set_window_rect)fyto_open_image_on_primary(_viv_hwnd);
         if ((open_filename) && (_viv_open_from_filename(open_filename)))
 		{
 			// all good.
@@ -5425,8 +5427,8 @@ static int _viv_init(int nCmdShow)
 	rect.right = config_x + config_wide;
 	rect.bottom = config_y + config_high;
 	
-    // Empty view uses a landscape rectangle on every monitor orientation.
-    {RECT work;os_MonitorRectFromCursor(0,&work);fyto_empty_window_rect(&rect,&work);}
+    // Start on primary even when Explorer and the cursor are on another screen.
+    {RECT work;fyto_primary_work_rect(&work);fyto_empty_window_rect(&rect,&work);}
 
     _viv_fit_box_wide=rect.right-rect.left;
     _viv_fit_box_high=rect.bottom-rect.top;
