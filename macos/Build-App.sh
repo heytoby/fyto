@@ -49,7 +49,8 @@ plutil -lint "$app/Contents/Info.plist"
 
 for architecture in arm64 x86_64; do
     xcrun swiftc -swift-version 5 -O -target "$architecture-apple-macos12.0" \
-        "$root/macos/Fyto.swift" "$root/macos/ViewerCanvas.swift" -o "$work/fyto-$architecture"
+        "$root/macos/Fyto.swift" "$root/macos/ViewerCanvas.swift" \
+        "$root/macos/PhotoMetadata.swift" "$root/macos/MacUpdater.swift" -o "$work/fyto-$architecture"
 done
 xcrun lipo -create "$work/fyto-arm64" "$work/fyto-x86_64" -output "$app/Contents/MacOS/fyto"
 chmod +x "$app/Contents/MacOS/fyto"
@@ -60,4 +61,5 @@ codesign --verify --deep --strict "$app"
 
 archive="$root/release-assets/fyto-$version-macos-universal.zip"
 ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+"$app/Contents/MacOS/fyto" --verify-update-archive "$archive"
 shasum -a 256 "$archive"

@@ -94,6 +94,7 @@ private final class GlyphButton: NSButton {
 final class ViewerCanvas: NSView {
     weak var viewer: Fyto?
     private let photoLayer = PhotoLayer()
+    private let metadataPanel = MetadataPanel()
     private let image = NSImageView()
     private let filename = NSTextField(labelWithString: "")
     private let resolution = NSTextField(labelWithString: "")
@@ -124,6 +125,8 @@ final class ViewerCanvas: NSView {
         image.animates = true
         photoLayer.addSubview(image)
         addSubview(photoLayer)
+        addSubview(metadataPanel)
+        metadataPanel.onClose = { [weak self] in self?.viewer?.toggleMetadata() }
         for label in [filename, resolution] {
             label.font = viewerFont(13)
             label.textColor = .white
@@ -177,7 +180,9 @@ final class ViewerCanvas: NSView {
         super.layout()
         let standard = viewer?.standard == true
         let chrome = standard ? titleHeight : 0
-        viewport = CGRect(x: 0, y: chrome, width: bounds.width, height: max(0, bounds.height - chrome))
+        let sidebar = viewer?.metadataWidth(in: bounds.width) ?? 0
+        viewport = CGRect(x: 0, y: chrome, width: max(0, bounds.width - sidebar), height: max(0, bounds.height - chrome))
+        metadataPanel.frame = CGRect(x: viewport.maxX, y: chrome, width: sidebar, height: viewport.height)
         let fit = imageFit(pixels, in: viewport.size)
         let size = CGSize(width: fit.width * zoom, height: fit.height * zoom)
         let maxX = max(0, (size.width - viewport.width) / 2)
@@ -226,9 +231,12 @@ final class ViewerCanvas: NSView {
         refreshControls()
     }
 
+    func showMetadata(_ value: PhotoMetadata) { metadataPanel.show(value) }
+
     func refreshControls(animated: Bool = false) {
         let standard = viewer?.standard == true
         let hasPhoto = image.image != nil
+        metadataPanel.isHidden = viewer?.showsMetadata != true
         for button in [menuButton, minimize, maximize, close] { button.isHidden = !standard }
         open.isHidden = hasPhoto
         pin.isHidden = !standard && (!hover || !hasPhoto)

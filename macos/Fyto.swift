@@ -28,6 +28,7 @@ struct Photo {
     let url: URL
     let image: NSImage
     let pixels: CGSize
+    let metadata: PhotoMetadata
 
     init?(url: URL) {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -40,8 +41,10 @@ struct Photo {
         let swapped = (5...8).contains(orientation)
         self.url = url
         self.image = image
-        self.pixels = CGSize(width: swapped ? height.doubleValue : width.doubleValue,
-                             height: swapped ? width.doubleValue : height.doubleValue)
+        let dimensions = CGSize(width: swapped ? height.doubleValue : width.doubleValue,
+                                height: swapped ? width.doubleValue : height.doubleValue)
+        self.pixels = dimensions
+        self.metadata = PhotoMetadata(properties: properties, dimensions: dimensions)
     }
 
     func size(turned turns: Int) -> CGSize {
@@ -86,6 +89,7 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private(set) var standard = UserDefaults.standard.bool(forKey: "standardMode")
     private(set) var pinned = UserDefaults.standard.bool(forKey: "pinned")
     private(set) var photo: Photo?
+    private(set) var metadataOpen = false
     private var files: [URL] = []
     private var index = 0
     private var turns = 0
@@ -94,8 +98,14 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var expanded = false
     private var restoreFrame: NSRect?
     private var scrollAmount: CGFloat = 0
+    private var updating = false
 
     var playing: Bool { slideshow != nil }
+    var showsMetadata: Bool { metadataOpen && photo != nil }
+
+    func metadataWidth(in width: CGFloat) -> CGFloat {
+        showsMetadata ? min(320, max(0, width - 100)) : 0
+    }
     var screen: NSScreen? { window.screen ?? NSScreen.screens.first }
 
     override init() {
@@ -132,6 +142,10 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        updating ? .terminateCancel : .terminateNow
+    }
 
     func windowDidEndLiveResize(_ notification: Notification) {
         expanded = false
@@ -186,6 +200,7 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
         photo = next
         turns = 0
         canvas.setPhoto(next.image, pixels: next.pixels, name: next.url.lastPathComponent, resetZoom: true)
+        canvas.showMetadata(next.metadata)
         window.title = next.url.lastPathComponent
         window.representedURL = next.url
         if !expanded { fitWindow(on: opening ? NSScreen.screens.first : screen) }
@@ -218,6 +233,14 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
         canvas.refreshControls()
     }
 
+    @objc func toggleMetadata() {
+        guard photo != nil else { return }
+        metadataOpen.toggle()
+        window.minSize = NSSize(width: metadataOpen ? 240 : 64, height: metadataOpen ? 160 : 64)
+        canvas.refreshControls()
+        if !expanded { fitWindow(on: screen) }
+    }
+
     @objc func toggleMode() {
         let previous = window.frame
         standard.toggle()
@@ -230,10 +253,12 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let maximum = NSSize(width: expanded || fillsHeight ? work.width : min(work.width, previous.width),
                              height: min(work.height, expanded ? work.height : previous.height))
         let chrome = standard ? titleHeight : 0
+        let sidebar = metadataWidth(in: maximum.width)
         let fit = imageFit(photo.size(turned: turns),
-                           in: CGSize(width: maximum.width, height: maximum.height - chrome))
+                           in: CGSize(width: maximum.width - sidebar, height: maximum.height - chrome))
         guard fit.width > 0, fit.height > 0 else { return }
-        let size = CGSize(width: max(64, fit.width), height: max(64, fit.height + chrome))
+        let size = CGSize(width: max(window.minSize.width, fit.width + sidebar),
+                          height: max(window.minSize.height, fit.height + chrome))
         window.setFrame(clamp(NSRect(x: previous.midX - size.width / 2, y: previous.midY - size.height / 2,
                                      width: size.width, height: size.height), to: work), display: true)
     }
@@ -265,7 +290,7 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func hideWindow() { window.orderOut(nil) }
-    @objc func closeWindow() { window.close() }
+    @objc func closeWindow() { if !updating { window.close() } }
 
     @objc func toggleMaximized() {
         guard let screen else { return }
@@ -307,11 +332,12 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let size: CGSize
         if let photo {
             let chrome = standard ? titleHeight : 0
-            let longEdge = min(manualLongEdge ?? 1980 / screen.backingScaleFactor,
-                               work.width, work.height - chrome)
-            let fitted = imageFit(photo.size(turned: turns),
-                                  in: CGSize(width: work.width, height: work.height - chrome), longEdge: longEdge)
-            size = CGSize(width: max(64, fitted.width), height: max(64, fitted.height + chrome))
+            let sidebar = metadataWidth(in: work.width)
+            let imageArea = CGSize(width: work.width - sidebar, height: work.height - chrome)
+            let longEdge = min(manualLongEdge ?? 1980 / screen.backingScaleFactor, imageArea.width, imageArea.height)
+            let fitted = imageFit(photo.size(turned: turns), in: imageArea, longEdge: longEdge)
+            size = CGSize(width: max(window.minSize.width, fitted.width + sidebar),
+                          height: max(window.minSize.height, fitted.height + chrome))
         } else {
             size = imageFit(CGSize(width: 800, height: 500),
                             in: CGSize(width: work.width * 0.9, height: work.height * 0.8), longEdge: 800)
@@ -373,10 +399,78 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch character {
         case "1": if !event.isARepeat { toggleMode() }; return true
         case "p": if !event.isARepeat { togglePlayback() }; return true
+        case "a": if !event.isARepeat { toggleMetadata() }; return true
         case "f": if !event.isARepeat { toggleMaximized() }; return true
         case "0": canvas.resetZoom(); return true
         default: return false
         }
+    }
+
+    @objc func checkForUpdates() {
+        guard !updating else { return }
+        updating = true
+        let status = NSTextField(labelWithString: "正在检查 GitHub 正式版…")
+        status.font = viewerFont(13)
+        status.frame = CGRect(x: 46, y: 21, width: 330, height: 24)
+        let spinner = NSProgressIndicator(frame: CGRect(x: 18, y: 24, width: 17, height: 17))
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.startAnimation(nil)
+        let panel = NSPanel(contentRect: CGRect(x: 0, y: 0, width: 400, height: 64),
+                            styleMask: [.titled], backing: .buffered, defer: false)
+        panel.title = "检查更新"
+        panel.isFloatingPanel = true
+        panel.contentView?.addSubview(spinner)
+        panel.contentView?.addSubview(status)
+        panel.center()
+        panel.orderFront(nil)
+
+        Task { @MainActor in
+            defer {
+                updating = false
+                panel.orderOut(nil)
+            }
+            do {
+                let result = try await MacUpdater.check()
+                panel.orderOut(nil)
+                guard let asset = result.asset else {
+                    let installed = result.installed
+                    let latest = result.latest
+                    if installed == latest {
+                        updateNotice("当前已是最新版", detail: "fyto \(installed)")
+                    } else {
+                        updateNotice("暂无可安装的新版",
+                                     detail: "已安装 \(installed)，GitHub 最新正式版为 \(latest)。")
+                    }
+                    return
+                }
+
+                let confirm = NSAlert()
+                confirm.messageText = "发现 fyto \(asset.version)"
+                confirm.informativeText = "安装后会重新打开 fyto，并恢复当前图片。"
+                confirm.addButton(withTitle: "安装并重新打开")
+                confirm.addButton(withTitle: "取消")
+                guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+                status.stringValue = "正在下载、校验并安装…"
+                panel.orderFront(nil)
+                try await MacUpdater.install(asset, replacing: result.installed, reopen: photo?.url)
+                panel.orderOut(nil)
+                updating = false
+                NSApp.terminate(nil)
+            } catch {
+                panel.orderOut(nil)
+                updateNotice("更新未完成", detail: error.localizedDescription)
+            }
+        }
+    }
+
+    private func updateNotice(_ title: String, detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: "确定")
+        alert.runModal()
     }
 
     func menu() -> NSMenu {
@@ -396,11 +490,24 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(.separator())
         _ = item("打开图片…", #selector(openDialog), key: "o", modifiers: .command)
         _ = item("在 Finder 中显示", #selector(showInFinder))
+        let metadata = item("EXIF 信息", #selector(toggleMetadata), key: "a")
+        metadata.state = showsMetadata ? .on : .off
         _ = item("顺时针旋转", #selector(clockwise), key: String(UnicodeScalar(NSRightArrowFunctionKey)!), modifiers: .control)
         _ = item("逆时针旋转", #selector(counterclockwise), key: String(UnicodeScalar(NSLeftArrowFunctionKey)!), modifiers: .control)
         _ = item(expanded ? "恢复窗口" : "最大化", #selector(toggleMaximized), key: "f")
         _ = item("隐藏窗口", #selector(hideWindow), key: "m", modifiers: .command)
         _ = item("关闭", #selector(closeWindow), key: "w", modifiers: .command)
+        let help = NSMenuItem(title: "帮助", action: nil, keyEquivalent: "")
+        let helpMenu = NSMenu(title: "帮助")
+        helpMenu.font = viewerFont(13)
+        helpMenu.autoenablesItems = false
+        let update = NSMenuItem(title: updating ? "正在更新…" : "检查更新…",
+                                action: #selector(checkForUpdates), keyEquivalent: "")
+        update.target = self
+        update.isEnabled = !updating
+        helpMenu.addItem(update)
+        help.submenu = helpMenu
+        menu.addItem(help)
         return menu
     }
 }
@@ -411,16 +518,30 @@ enum FytoMain {
         registerViewerFont()
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.first == "--verify-update-archive", arguments.count == 2 {
+            do { try MacUpdater.verifyArchive(URL(fileURLWithPath: arguments[1])) }
+            catch {
+                FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
+                exit(1)
+            }
+            return
+        }
+
         let viewer = Fyto()
-        if CommandLine.arguments.dropFirst().contains("--verify") {
-            verify(application, viewer)
+        if arguments.contains("--verify") {
+            do { try verify(application, viewer) }
+            catch {
+                FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
+                exit(1)
+            }
             return
         }
         application.delegate = viewer
         withExtendedLifetime(viewer) { application.run() }
     }
 
-    @MainActor private static func verify(_ application: NSApplication, _ viewer: Fyto) {
+    @MainActor private static func verify(_ application: NSApplication, _ viewer: Fyto) throws {
         precondition(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool == true)
         precondition(application.activationPolicy() == .accessory)
         precondition(viewerFont(13).fontName == "SourceHanSansCN-Regular")
@@ -434,6 +555,8 @@ enum FytoMain {
         precondition(viewer.pinned != previous)
         viewer.togglePin()
         precondition(viewer.pinned == previous)
+        PhotoMetadata.verify()
+        try MacUpdater.verifyFeed()
         print("macOS accessory policy, embedded font, long-edge sizing and topmost state verified")
     }
 }

@@ -6,54 +6,99 @@ on:
     paths:
       - voidImageViewer/src/version.h
       - .github/workflows/release.yml
+      - .github/workflows/build-packages.yml
       - scripts/Build-Release.ps1
+      - macos/Build-App.sh
       - voidImageViewer/installer/build-bootstrap.ps1
     tags: ['v1.0.0.*']
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: fyto-release
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: windows-2022
-    timeout-minutes: 30
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      exists: ${{ steps.version.outputs.exists }}
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - name: Resolve version
         id: version
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $header = Get-Content ./voidImageViewer/src/version.h -Raw
-          $parts = @('MAJOR','MINOR','REVISION','BUILD') | ForEach-Object { [int][regex]::Match($header, ('VERSION_' + $_ + '\s+(\d+)')).Groups[1].Value }
-          $tag = 'v' + ($parts -join '.')
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) { throw 'Tag and source version differ' }
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          "exists=$($LASTEXITCODE -eq 0)".ToLowerInvariant() >> $env:GITHUB_OUTPUT
-          $global:LASTEXITCODE = 0
-      - name: Build and verify release assets
-        if: steps.version.outputs.exists != 'true'
-        shell: pwsh
-        run: ./scripts/Build-Release.ps1
-      - name: Publish release
-        if: steps.version.outputs.exists != 'true'
-        shell: pwsh
+          version=$(awk '
+            $2=="VERSION_MAJOR" { major=$3+0 }
+            $2=="VERSION_MINOR" { minor=$3+0 }
+            $2=="VERSION_REVISION" { revision=$3+0 }
+            $2=="VERSION_BUILD" { build=$3+0 }
+            END { print major "." minor "." revision "." build }
+          ' voidImageViewer/src/version.h)
+          tag="v$version"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "Tag and source version differ" >&2
+            exit 1
+          fi
+          printf 'tag=%s\nversion=%s\n' "$tag" "$version" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.exists != 'true'
+    uses: ./.github/workflows/build-packages.yml
+
+  publish:
+    needs: [resolve, build]
+    if: needs.resolve.outputs.exists != 'true'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyto-Windows-x64
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyto-macOS-Universal
+          path: release-assets
+      - name: Verify and publish both platforms
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          FYTO_TAG: ${{ steps.version.outputs.tag }}
+          FYTO_TAG: ${{ needs.resolve.outputs.tag }}
+          FYTO_VERSION: ${{ needs.resolve.outputs.version }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $assets = Get-ChildItem ./release-assets -File | Select-Object -ExpandProperty FullName
-          if ($assets.Count -ne 4) { throw 'Expected installer, installer ZIP, source ZIP, and SHA256SUMS.txt' }
-          gh release create $env:FYTO_TAG @assets --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --latest --title "fyto $($env:FYTO_TAG)" --notes-file RELEASE_NOTES.md
-          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+          mac="fyto-$FYTO_VERSION-macos-universal.zip"
+          (
+            cd release-assets
+            sed -i 's/\r$//' SHA256SUMS.txt
+            sha256sum "$mac" >> SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+          assets=(
+            "release-assets/fyto-Setup-$FYTO_VERSION.exe"
+            "release-assets/fyto-Setup-$FYTO_VERSION.zip"
+            "release-assets/fyto-source-$FYTO_VERSION.zip"
+            "release-assets/$mac"
+            "release-assets/SHA256SUMS.txt"
+          )
+          gh release create "$FYTO_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --latest --title "fyto $FYTO_TAG" --notes-file RELEASE_NOTES.md
