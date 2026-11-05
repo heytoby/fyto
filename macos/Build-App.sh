@@ -53,7 +53,7 @@ for architecture in arm64 x86_64; do
 done
 xcrun lipo -create "$work/fyto-arm64" "$work/fyto-x86_64" -output "$app/Contents/MacOS/fyto"
 chmod +x "$app/Contents/MacOS/fyto"
-xcrun lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/fyto"
+xcrun lipo "$app/Contents/MacOS/fyto" -verify_arch arm64 x86_64
 codesign --force --sign - --timestamp=none "$app"
 codesign --verify --deep --strict "$app"
 "$app/Contents/MacOS/fyto" --verify
