@@ -57,7 +57,7 @@ private final class GlyphButton: NSButton {
                 (17, 15), (11, 15), (11, 20), (10, 21), (9, 20), (9, 15),
                 (3, 15), (3, 13), (7, 10), (7, 5), (5, 5)
             ]
-            let scale = min(0.9, (min(bounds.width, bounds.height) - 2) / 22)
+            let scale = min(14, min(bounds.width, bounds.height) - 2) / 22
             for (index, point) in points.enumerated() {
                 let p = CGPoint(x: x + (point.0 - 10) * scale, y: y + (point.1 - 11) * scale)
                 if index == 0 { path.move(to: p) } else { path.line(to: p) }
@@ -195,19 +195,21 @@ final class ViewerCanvas: NSView {
         image.frame = photoFrame.offsetBy(dx: -viewport.minX, dy: -viewport.minY)
         let visible = viewport.intersection(photoFrame)
         let slot = min(44, bounds.width / 4)
+        let margin = min(max(72, 4 * slot + 12), bounds.width / 2)
+        filename.frame = CGRect(x: margin, y: 9, width: max(0, bounds.width - 2 * margin), height: 22)
+        let pinHeight: CGFloat = 26
+        let pinY = filename.frame.midY - pinHeight / 2
         if standard {
-            pin.frame = CGRect(x: bounds.width - 4 * slot, y: 0, width: slot, height: titleHeight)
+            pin.frame = CGRect(x: bounds.width - 4 * slot, y: pinY, width: slot, height: pinHeight)
         } else {
-            let side = min(34, visible.width - 24, visible.height - 24)
-            pin.frame = !visible.isNull && side >= 16
-                ? CGRect(x: visible.maxX - 12 - side, y: visible.minY + 12, width: side, height: side) : .zero
+            let width = min(34, visible.width - 24)
+            pin.frame = !visible.isNull && width >= 16
+                ? CGRect(x: visible.maxX - 12 - width, y: pinY, width: width, height: pinHeight) : .zero
         }
         for (offset, button) in [minimize, maximize, close].enumerated() {
             button.frame = CGRect(x: bounds.width - CGFloat(3 - offset) * slot, y: 0, width: slot, height: titleHeight)
         }
         menuButton.frame = CGRect(x: 8, y: 0, width: min(64, max(0, bounds.width - 4 * slot - 8)), height: titleHeight)
-        let margin = min(max(72, 4 * slot + 12), bounds.width / 2)
-        filename.frame = CGRect(x: margin, y: 9, width: max(0, bounds.width - 2 * margin), height: 22)
         open.frame = CGRect(x: bounds.midX - 68, y: viewport.midY - 18, width: 136, height: 36)
         if visible.isNull {
             playback.frame = .zero
@@ -292,8 +294,32 @@ final class ViewerCanvas: NSView {
         refreshControls(animated: true)
     }
 
+    private func containsHover(_ point: CGPoint) -> Bool {
+        let visible = viewport.intersection(photoFrame)
+        if visible.contains(point) { return true }
+        guard hover, viewer?.standard != true, !visible.isNull, !pin.frame.isEmpty else { return false }
+        var reach = pin.frame
+        reach.size.height = max(reach.maxY, visible.minY) - reach.minY
+        return reach.contains(point)
+    }
+
     override func mouseMoved(with event: NSEvent) {
-        setHover(viewport.intersection(photoFrame).contains(convert(event.locationInWindow, from: nil)))
+        setHover(containsHover(convert(event.locationInWindow, from: nil)))
+    }
+
+    static func verifyPinAlignment() {
+        let canvas = ViewerCanvas()
+        let dimensions = CGSize(width: 1600, height: 400)
+        canvas.frame = CGRect(x: 0, y: 0, width: 960, height: 640)
+        canvas.setPhoto(NSImage(size: dimensions), pixels: dimensions, name: "Pin layout", resetZoom: true)
+        canvas.layout()
+        precondition(canvas.pin.frame.midY == canvas.filename.frame.midY)
+        precondition(canvas.photoFrame.minY > canvas.pin.frame.maxY)
+        let point = CGPoint(x: canvas.pin.frame.midX, y: canvas.pin.frame.midY)
+        precondition(!canvas.containsHover(point))
+        canvas.hover = true
+        precondition(canvas.containsHover(point))
+        print("macOS pin alignment and letterbox hover verified")
     }
 
     override func mouseEntered(with event: NSEvent) { mouseMoved(with: event) }

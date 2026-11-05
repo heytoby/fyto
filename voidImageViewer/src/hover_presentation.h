@@ -8,11 +8,16 @@ static int fyto_hover_font_dpi;
 static void fyto_hover_layout(const RECT *image,const RECT *canvas,int dpi_x,int dpi_y,fyto_hover_layout_t *out)
 {
     int pad=MulDiv(12,dpi_x,96),box=MulDiv(40,dpi_y,96),text_h=MulDiv(20,dpi_y,96);
-    int width=image->right-image->left,height=image->bottom-image->top,play_left,pin_box;
+    int width=image->right-image->left,height=image->bottom-image->top,play_left;
+    int caption_h=min(fyto_caption_height(dpi_y),canvas->bottom-canvas->top);
+    int pin_h=min(MulDiv(26,dpi_y,96),caption_h);
+    int pin_y=canvas->top+(caption_h-pin_h)/2;
+    int pin_w;
+
     if(pad<2)pad=2;
-    pin_box=min(MulDiv(34,dpi_y,96),min(width-2*pad,height-2*pad));
-    if(pin_box>=MulDiv(16,dpi_y,96))
-        SetRect(&out->pin,image->right-pad-pin_box,image->top+pad,image->right-pad,image->top+pad+pin_box);
+    pin_w=min(MulDiv(34,dpi_x,96),width-2*pad);
+    if(pin_w>=MulDiv(16,dpi_x,96) && pin_h>=MulDiv(16,dpi_y,96))
+        SetRect(&out->pin,image->right-pad-pin_w,pin_y,image->right-pad,pin_y+pin_h);
     else SetRectEmpty(&out->pin);
     if(box>height-pad*2)box=max(0,height-pad*2);
     if(box>width-pad*2)box=max(0,width-pad*2);

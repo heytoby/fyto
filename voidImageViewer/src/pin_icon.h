@@ -9,7 +9,7 @@ static void fyto_draw_pin(HDC dc,const RECT *box,int pinned,int shadow,int dpi)
         {7,10},{7,5},{5,5}
     };
     POINT points[ARRAYSIZE(outline)];
-    int size = min(MulDiv(19,dpi,96),min(box->right-box->left,box->bottom-box->top)-2);
+    int size = min(MulDiv(14,dpi,96),min(box->right-box->left,box->bottom-box->top)-2);
     int left,top,pass,i,saved;
 
     if (size<8)return;

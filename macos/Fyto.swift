@@ -556,6 +556,7 @@ enum FytoMain {
         viewer.togglePin()
         precondition(viewer.pinned == previous)
         PhotoMetadata.verify()
+        ViewerCanvas.verifyPinAlignment()
         try MacUpdater.verifyFeed()
         print("macOS accessory policy, embedded font, long-edge sizing and topmost state verified")
     }

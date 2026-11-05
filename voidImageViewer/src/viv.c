@@ -2662,7 +2662,36 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
         case WM_SETTINGCHANGE:
             if(wParam==SPI_SETWORKAREA)PostMessage(hwnd,FYTO_REFIT_WINDOW,0,0);break;
         case 0x02E0: /* WM_DPICHANGED */
-            PostMessage(hwnd,FYTO_REFIT_WINDOW,0,0);break;
+        {
+            RECT target=*(const RECT *)lParam, before;
+            UINT flags=SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED;
+            BYTE was_fitting=_viv_fitting_window;
+            BOOL moved_without_resizing;
+
+            GetWindowRect(hwnd,&before);
+            moved_without_resizing=_viv_in_sizemove &&
+                before.right-before.left==_viv_move_start_rect.right-_viv_move_start_rect.left &&
+                before.bottom-before.top==_viv_move_start_rect.bottom-_viv_move_start_rect.top;
+            os_logical_wide=LOWORD(wParam);
+            os_logical_high=HIWORD(wParam);
+            if (_viv_is_fullscreen)
+            {
+                MONITORINFO monitor={sizeof(monitor)};
+                if (GetMonitorInfo(MonitorFromRect(&target,MONITOR_DEFAULTTONEAREST),&monitor))
+                    target=monitor.rcMonitor;
+            }
+            else if (IsZoomed(hwnd) || _viv_window_arranged(hwnd))
+                flags|=SWP_NOMOVE|SWP_NOSIZE;
+
+            _viv_fitting_window=1;
+            SetWindowPos(hwnd,NULL,target.left,target.top,target.right-target.left,target.bottom-target.top,flags);
+            if (moved_without_resizing)GetWindowRect(hwnd,&_viv_move_start_rect);
+            if (_viv_hwnd)_viv_on_size();
+            _viv_fitting_window=was_fitting;
+            RedrawWindow(hwnd,NULL,NULL,RDW_INVALIDATE|RDW_FRAME|RDW_ALLCHILDREN);
+            if (!_viv_in_sizemove)PostMessage(hwnd,FYTO_REFIT_WINDOW,0,0);
+            return 0;
+        }
         case WM_NCCALCSIZE:
         {
             RECT *client=wParam?&((NCCALCSIZE_PARAMS *)lParam)->rgrc[0]:(RECT *)lParam;
@@ -5538,7 +5567,8 @@ static void _viv_kill(void)
 {
     fyto_hover_stop();
     fyto_hover_presentation_destroy();
-	exif_shutdown();if(title_font){DeleteObject(title_font);title_font=NULL;}
+	exif_shutdown();
+    title_release_fonts();
 	_viv_show_cursor();
 
 	// don't load another image..

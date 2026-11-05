@@ -39,19 +39,33 @@ static void fyto_hover_target(HWND hwnd,BYTE hover)
     }else KillTimer(hwnd,FYTO_HOVER_FADE_TIMER);
     fyto_hover_invalidate(hwnd);
 }
+static BOOL fyto_hover_contains(const RECT *image,const RECT *pin,POINT point)
+{
+    RECT reach;
+    if(PtInRect(image,point))return TRUE;
+    if(!fyto_image_hover || config_show_caption || IsRectEmpty(pin))return FALSE;
+
+    // Keep the pin available while crossing the space above a letterboxed image.
+    reach=*pin;
+    reach.bottom=max(reach.bottom,image->top);
+    return PtInRect(&reach,point);
+}
 static UINT fyto_hover_command(POINT point)
 {
-    RECT image,canvas;fyto_hover_layout_t layout;
-    if(_viv_in_sizemove || !fyto_visible_image_rect(&image) || !PtInRect(&image,point))return 0;
+    RECT image,canvas;fyto_hover_layout_t layout;BOOL over_image;
+    if(_viv_in_sizemove || !fyto_visible_image_rect(&image))return 0;
+    over_image=PtInRect(&image,point);
     _viv_viewport_rect(&canvas);fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
-    if(!config_show_caption && PtInRect(&layout.pin,point))return VIV_ID_VIEW_ONTOP_ALWAYS;
-    if(PtInRect(&layout.play,point))return VIV_ID_SLIDESHOW_PAUSE;
+    if(!config_show_caption && (over_image || fyto_image_hover) && PtInRect(&layout.pin,point))return VIV_ID_VIEW_ONTOP_ALWAYS;
+    if(over_image && PtInRect(&layout.play,point))return VIV_ID_SLIDESHOW_PAUSE;
     return 0;
 }
 static void fyto_update_image_hover(POINT point)
 {
-    RECT image;BYTE hover=fyto_visible_image_rect(&image) && PtInRect(&image,point);
-    fyto_hover_target(_viv_hwnd,hover);
+    RECT image,canvas;fyto_hover_layout_t layout;
+    if(!fyto_visible_image_rect(&image)){fyto_hover_target(_viv_hwnd,0);return;}
+    _viv_viewport_rect(&canvas);fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
+    fyto_hover_target(_viv_hwnd,fyto_hover_contains(&image,&layout.pin,point));
 }
 static BOOL fyto_hover_input(HWND hwnd,UINT message,WPARAM buttons,LPARAM position)
 {
@@ -87,21 +101,18 @@ static BOOL fyto_hover_input(HWND hwnd,UINT message,WPARAM buttons,LPARAM positi
 }
 static void fyto_paint_image_hover(HDC dc)
 {
-    RECT image,canvas;POINT point;BYTE visible,alpha;
+    RECT image,canvas;POINT point;BYTE visible,alpha;fyto_hover_layout_t layout;
     if(!fyto_visible_image_rect(&image) || _viv_in_sizemove){fyto_hover_target(_viv_hwnd,0);return;}
+    _viv_viewport_rect(&canvas);fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
     GetCursorPos(&point);visible=WindowFromPoint(point)==_viv_hwnd;
-    ScreenToClient(_viv_hwnd,&point);fyto_hover_target(_viv_hwnd,visible && PtInRect(&image,point));
+    ScreenToClient(_viv_hwnd,&point);
+    fyto_hover_target(_viv_hwnd,visible && fyto_hover_contains(&image,&layout.pin,point));
     alpha=fyto_hover_fade_alpha(&fyto_hover_fade,GetTickCount());
     if(!alpha && !fyto_image_hover)return;
-    _viv_viewport_rect(&canvas);
     fyto_draw_hover(dc,&image,&canvas,_viv_current_fd?string_get_filename_part(_viv_current_fd->cFileName):L"",
         _viv_image_wide,_viv_image_high,!config_show_caption,_viv_is_slideshow,alpha,fyto_image_hover,os_logical_wide,os_logical_high);
-    if (!config_show_caption && fyto_image_hover)
-    {
-        fyto_hover_layout_t layout;
-        fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
+    if(!config_show_caption && fyto_image_hover)
         fyto_draw_pin(dc,&layout.pin,config_ontop==1,1,os_logical_high);
-    }
 }
 static void fyto_hover_stop(void)
 {

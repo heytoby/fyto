@@ -2,6 +2,7 @@
 #define FYTO_MENU_FONT_H
 #include <oleacc.h>
 #include <wctype.h>
+#include "caption_metrics.h"
 
 typedef struct fyto_menu_item {
     MSAAMENUINFO accessible;
@@ -54,17 +55,12 @@ static void fyto_set_popup_font(HMENU menu,fyto_menu_item_t **items)
 
 static UINT fyto_track_popup(HWND hwnd,HMENU menu,UINT flags,int x,int y)
 {
-    NONCLIENTMETRICSW metrics = {sizeof(metrics)};
     fyto_menu_item_t *items = NULL;
     UINT command;
 
     flags |= TPM_RETURNCMD;
     if (!menu || fyto_menu_font)return 0;
-    if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0))
-    {
-        wcscpy_s(metrics.lfMenuFont.lfFaceName,LF_FACESIZE,L"Source Han Sans CN");
-        fyto_menu_font = CreateFontIndirectW(&metrics.lfMenuFont);
-    }
+    fyto_menu_font = fyto_menu_create_font(os_logical_high);
     if (fyto_menu_font)fyto_set_popup_font(menu,&items);
     command = TrackPopupMenu(menu,flags,x,y,0,hwnd,NULL);
 

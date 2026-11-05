@@ -2,10 +2,18 @@
 #define FYTO_CAPTION_METRICS_H
 /* Standard and minimal captions share their font and top-row alignment. */
 static int fyto_caption_height(int dpi_y){return MulDiv(36,dpi_y,96);}
+static HFONT fyto_create_ui_font(int points,int dpi_y)
+{
+    return CreateFontW(-MulDiv(points,dpi_y,72),0,0,0,FW_NORMAL,0,0,0,
+        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Source Han Sans CN");
+}
 static HFONT fyto_caption_create_font(int dpi_y)
 {
-    return CreateFontW(-MulDiv(10,dpi_y,72),0,0,0,FW_NORMAL,0,0,0,
-        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Source Han Sans CN");
+    return fyto_create_ui_font(10,dpi_y);
+}
+static HFONT fyto_menu_create_font(int dpi_y)
+{
+    return fyto_create_ui_font(11,dpi_y);
 }
 static void fyto_caption_filename_rect(const RECT *canvas,int dpi_x,int dpi_y,int menu_right,RECT *out)
 {

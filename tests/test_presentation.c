@@ -203,7 +203,16 @@ static HANDLE verify_embedded_font(const wchar_t *path)
     SelectObject(dc,old);
     DeleteObject(face);
     DeleteDC(dc);
-    puts("Source Han Sans private font and Chinese glyphs verified");
+    for (int dpi=96; dpi<=192; dpi+=24)
+    {
+        LOGFONTW metrics;
+        face=fyto_menu_create_font(dpi);
+        assert(face && GetObjectW(face,sizeof(metrics),&metrics)==sizeof(metrics));
+        assert(metrics.lfHeight==-MulDiv(11,dpi,72));
+        assert(!wcscmp(metrics.lfFaceName,L"Source Han Sans CN"));
+        DeleteObject(face);
+    }
+    puts("Source Han Sans private font, Chinese glyphs and menu scaling verified");
     return font;
 }
 int wmain(int argc,wchar_t **argv){
@@ -419,6 +428,7 @@ int wmain(int argc,wchar_t **argv){
         assert(fyto_visible_image_rect(&visible));_viv_viewport_rect(&canvas);fyto_hover_layout(&visible,&canvas,96,96,&layout);
         assert(!contrast(pixels,clean,960,layout.filename));
         assert(contrast(pixels,clean,960,layout.pin)>0);
+        assert(abs((layout.pin.top+layout.pin.bottom)-(layout.filename.top+layout.filename.bottom))<=1);
         point.x=(layout.pin.left+layout.pin.right)/2;point.y=(layout.pin.top+layout.pin.bottom)/2;
         assert(fyto_hover_input(_viv_hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(point.x,point.y)));
         assert(fyto_hover_input(_viv_hwnd,WM_LBUTTONUP,0,MAKELPARAM(point.x,point.y)));
@@ -470,6 +480,18 @@ int wmain(int argc,wchar_t **argv){
         fake_cursor.x=300;fake_cursor.y=20;
         assert(fyto_visible_image_rect(&work)&&!PtInRect(&work,fake_cursor));
         fyto_update_image_hover(fake_cursor);assert(!fyto_image_hover);
+        _viv_viewport_rect(&canvas);fyto_hover_layout(&work,&canvas,96,96,&layout);
+        point.x=(layout.pin.left+layout.pin.right)/2;
+        point.y=(layout.pin.top+layout.pin.bottom)/2;
+        assert(!fyto_hover_command(point));
+        fake_cursor.x=point.x;fake_cursor.y=work.top;
+        fyto_update_image_hover(fake_cursor);assert(fyto_image_hover);
+        fake_cursor.y=work.top-1;
+        fyto_update_image_hover(fake_cursor);assert(fyto_image_hover);
+        fake_cursor=point;
+        fyto_update_image_hover(fake_cursor);assert(fyto_image_hover);
+        assert(fyto_hover_command(point)==VIV_ID_VIEW_ONTOP_ALWAYS);
+        fyto_hover_stop();
         memcpy(pixels,clean,bytes);fake_cursor.x=-1;fake_cursor.y=-1;fyto_paint_image_hover(dc);
         assert(!memcmp(clean,pixels,bytes));
         SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);free(clean);free(full);cases++;

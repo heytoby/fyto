@@ -3,6 +3,7 @@
 #include "viv.h"
 #include "exif.h"
 #include "ui_theme.h"
+#include "caption_metrics.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -77,6 +78,7 @@ static wchar_t exif_last_path[32768];
 static int exif_last_language=-1;
 static HWND exif_heading,exif_close;
 static HFONT exif_font,exif_heading_font;
+static int exif_font_dpi;
 static int exif_top,exif_bottom;
 static HBRUSH exif_brush;
 static COLORREF exif_bg=RGB(32,35,39);
@@ -155,8 +157,58 @@ static void load_metadata(const wchar_t *path){HANDLE file=INVALID_HANDLE_VALUE,
 static void copy_all(void){int i,count=ListView_GetItemCount(exif_list);size_t cap=(size_t)(count+1)*(EXIF_TEXT+512),used=0;HGLOBAL global;wchar_t *text;if(!OpenClipboard(exif_hwnd))return;global=GlobalAlloc(GMEM_MOVEABLE,cap*sizeof(wchar_t));if(!global){CloseClipboard();return;}text=(wchar_t *)GlobalLock(global);if(!text){GlobalFree(global);CloseClipboard();return;}text[0]=0;if(!exif_details){GetWindowTextW(exif_summary,text,(int)cap);}else for(i=0;i<count;i++){wchar_t key[256],value[EXIF_TEXT];LVITEMW item;ZeroMemory(&item,sizeof(item));item.iSubItem=0;item.pszText=key;item.cchTextMax=256;SendMessageW(exif_list,LVM_GETITEMTEXTW,i,(LPARAM)&item);item.iSubItem=1;item.pszText=value;item.cchTextMax=EXIF_TEXT;SendMessageW(exif_list,LVM_GETITEMTEXTW,i,(LPARAM)&item);fmt(text+used,cap-used,L"%s\t%s\r\n",key,value);used=wcslen(text);}GlobalUnlock(global);EmptyClipboard();if(!SetClipboardData(CF_UNICODETEXT,global))GlobalFree(global);CloseClipboard();}
 static WNDPROC exif_old_header_proc;
 static LRESULT CALLBACK exif_header_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){if(msg==WM_ERASEBKGND)return 1;if(msg==WM_PAINT){PAINTSTRUCT ps;RECT r;int i,n;HGDIOBJ old;BeginPaint(hwnd,&ps);GetClientRect(hwnd,&r);ui_fill(ps.hdc,&r,ui_mix(exif_bg,7));SetTextColor(ps.hdc,ui_text(exif_bg));SetBkMode(ps.hdc,TRANSPARENT);old=SelectObject(ps.hdc,exif_font);n=Header_GetItemCount(hwnd);for(i=0;i<n;i++){HDITEMW item;wchar_t label[200];ZeroMemory(&item,sizeof(item));item.mask=HDI_TEXT;item.pszText=label;item.cchTextMax=200;SendMessageW(hwnd,HDM_GETITEMW,i,(LPARAM)&item);Header_GetItemRect(hwnd,i,&r);r.left+=8;DrawTextW(ps.hdc,label,-1,&r,DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);}SelectObject(ps.hdc,old);EndPaint(hwnd,&ps);return 0;}return CallWindowProcW(exif_old_header_proc,hwnd,msg,wp,lp);}
-static LRESULT CALLBACK exif_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){switch(msg){case WM_CREATE:{LV_COLUMNW col;HFONT font;int dpi;HDC font_dc=GetDC(hwnd);dpi=GetDeviceCaps(font_dc,LOGPIXELSY);ReleaseDC(hwnd,font_dc);exif_font=CreateFontW(-MulDiv(10,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Source Han Sans CN");exif_heading_font=CreateFontW(-MulDiv(12,dpi,72),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Source Han Sans CN");font=exif_font;exif_heading=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE,20,18,220,28,hwnd,(HMENU)2007,os_hinstance,NULL);exif_close=CreateWindowExW(0,L"BUTTON",L"×",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,260,12,32,32,hwnd,(HMENU)2008,os_hinstance,NULL);SendMessageW(exif_heading,WM_SETFONT,(WPARAM)exif_heading_font,TRUE);SendMessageW(exif_close,WM_SETFONT,(WPARAM)font,TRUE);{TCITEMW tab;exif_tabs=CreateWindowExW(0,WC_TABCONTROLW,L"",WS_CHILD|WS_TABSTOP,8,36,520,26,hwnd,(HMENU)2006,os_hinstance,NULL);SendMessageW(exif_tabs,WM_SETFONT,(WPARAM)font,TRUE);ZeroMemory(&tab,sizeof(tab));tab.mask=TCIF_TEXT;tab.pszText=L"Overview";SendMessageW(exif_tabs,TCM_INSERTITEMW,0,(LPARAM)&tab);tab.pszText=L"All EXIF";SendMessageW(exif_tabs,TCM_INSERTITEMW,1,(LPARAM)&tab);if(!exif_richedit)exif_richedit=LoadLibraryW(L"msftedit.dll");exif_summary=CreateWindowExW(0,exif_richedit?L"RICHEDIT50W":L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,8,70,520,360,hwnd,(HMENU)2005,os_hinstance,NULL);SendMessageW(exif_summary,WM_SETFONT,(WPARAM)font,TRUE);SendMessageW(exif_summary,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(18,18));if(exif_richedit)SendMessageW(exif_summary,EM_SETBKGNDCOLOR,0,exif_bg);}exif_file=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,8,8,400,22,hwnd,(HMENU)2001,os_hinstance,NULL);exif_list=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SHOWSELALWAYS,8,36,520,400,hwnd,(HMENU)2002,os_hinstance,NULL);SendMessageW(exif_list,WM_SETFONT,(WPARAM)font,TRUE);SendMessageW(exif_file,WM_SETFONT,(WPARAM)font,TRUE);ListView_SetExtendedListViewStyle(exif_list,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_LABELTIP);ZeroMemory(&col,sizeof(col));col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=280;col.pszText=L"Field";SendMessageW(exif_list,LVM_INSERTCOLUMNW,0,(LPARAM)&col);col.cx=280;col.pszText=L"Value";SendMessageW(exif_list,LVM_INSERTCOLUMNW,1,(LPARAM)&col);exif_count=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE,8,440,400,22,hwnd,(HMENU)2003,os_hinstance,NULL);exif_copy=CreateWindowExW(0,L"BUTTON",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,430,438,96,26,hwnd,(HMENU)2004,os_hinstance,NULL);SendMessageW(exif_count,WM_SETFONT,(WPARAM)font,TRUE);SendMessageW(exif_copy,WM_SETFONT,(WPARAM)font,TRUE);{HWND header=ListView_GetHeader(exif_list);exif_old_header_proc=(WNDPROC)SetWindowLongPtrW(header,GWLP_WNDPROC,(LONG_PTR)exif_header_proc);}exif_overview_button=CreateWindowExW(0,L"BUTTON",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,16,90,140,32,hwnd,(HMENU)2011,os_hinstance,NULL);exif_detail_button=CreateWindowExW(0,L"BUTTON",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,160,90,140,32,hwnd,(HMENU)2012,os_hinstance,NULL);return 0;}
- case WM_SIZE:{int width=LOWORD(lp),height=HIWORD(lp);MoveWindow(exif_heading,20,18,width-76,28,TRUE);MoveWindow(exif_close,width-48,12,32,32,TRUE);MoveWindow(exif_file,20,56,width-40,22,TRUE);MoveWindow(exif_overview_button,16,90,(width-36)/2,32,TRUE);MoveWindow(exif_detail_button,20+(width-36)/2,90,(width-36)/2,32,TRUE);MoveWindow(exif_list,16,130,width-32,height-204>40?height-204:40,TRUE);MoveWindow(exif_summary,2,130,width-4,height-204>40?height-204:40,TRUE);MoveWindow(exif_count,20,height-62,width-40,22,TRUE);MoveWindow(exif_copy,20,height-36,width-40,28,TRUE);ListView_SetColumnWidth(exif_list,0,(width-40)/2);ListView_SetColumnWidth(exif_list,1,(width-40)/2);return 0;}
+static int exif_scale(int value)
+{
+    return MulDiv(value,os_logical_high,96);
+}
+
+static void exif_resize_controls(int width,int height)
+{
+    int body=max(exif_scale(40),height-exif_scale(204));
+    int tabs=max(0,(width-exif_scale(36))/2);
+    int text=max(0,width-exif_scale(40));
+    MoveWindow(exif_heading,exif_scale(20),exif_scale(18),max(0,width-exif_scale(76)),exif_scale(28),TRUE);
+    MoveWindow(exif_close,width-exif_scale(48),exif_scale(12),exif_scale(32),exif_scale(32),TRUE);
+    MoveWindow(exif_file,exif_scale(20),exif_scale(56),text,exif_scale(22),TRUE);
+    MoveWindow(exif_overview_button,exif_scale(16),exif_scale(90),tabs,exif_scale(32),TRUE);
+    MoveWindow(exif_detail_button,exif_scale(20)+tabs,exif_scale(90),tabs,exif_scale(32),TRUE);
+    MoveWindow(exif_list,exif_scale(16),exif_scale(130),max(0,width-exif_scale(32)),body,TRUE);
+    MoveWindow(exif_summary,exif_scale(2),exif_scale(130),max(0,width-exif_scale(4)),body,TRUE);
+    MoveWindow(exif_count,exif_scale(20),height-exif_scale(62),text,exif_scale(22),TRUE);
+    MoveWindow(exif_copy,exif_scale(20),height-exif_scale(36),text,exif_scale(28),TRUE);
+    ListView_SetColumnWidth(exif_list,0,text/2);
+    ListView_SetColumnWidth(exif_list,1,text/2);
+}
+
+static BOOL exif_refresh_fonts(void)
+{
+    HFONT font,heading,old_font=exif_font,old_heading=exif_heading_font;
+    HWND children[]={exif_close,exif_tabs,exif_summary,exif_list,exif_file,exif_count,exif_copy};
+    int i;
+    if (exif_font && exif_font_dpi==os_logical_high)return FALSE;
+    font=fyto_caption_create_font(os_logical_high);
+    heading=CreateFontW(-MulDiv(12,os_logical_high,72),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,
+        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Source Han Sans CN");
+    if (!font || !heading)
+    {
+        if (font)DeleteObject(font);
+        if (heading)DeleteObject(heading);
+        return FALSE;
+    }
+
+    exif_font=font;
+    exif_heading_font=heading;
+    exif_font_dpi=os_logical_high;
+    SendMessageW(exif_heading,WM_SETFONT,(WPARAM)heading,TRUE);
+    for (i=0; i<ARRAYSIZE(children); i++)
+        SendMessageW(children[i],WM_SETFONT,(WPARAM)font,TRUE);
+    if (old_font)DeleteObject(old_font);
+    if (old_heading)DeleteObject(old_heading);
+    return TRUE;
+}
+
+static LRESULT CALLBACK exif_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){switch(msg){case WM_CREATE:{LV_COLUMNW col;exif_heading=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE,20,18,220,28,hwnd,(HMENU)2007,os_hinstance,NULL);exif_close=CreateWindowExW(0,L"BUTTON",L"×",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,260,12,32,32,hwnd,(HMENU)2008,os_hinstance,NULL);{TCITEMW tab;exif_tabs=CreateWindowExW(0,WC_TABCONTROLW,L"",WS_CHILD|WS_TABSTOP,8,36,520,26,hwnd,(HMENU)2006,os_hinstance,NULL);ZeroMemory(&tab,sizeof(tab));tab.mask=TCIF_TEXT;tab.pszText=L"Overview";SendMessageW(exif_tabs,TCM_INSERTITEMW,0,(LPARAM)&tab);tab.pszText=L"All EXIF";SendMessageW(exif_tabs,TCM_INSERTITEMW,1,(LPARAM)&tab);if(!exif_richedit)exif_richedit=LoadLibraryW(L"msftedit.dll");exif_summary=CreateWindowExW(0,exif_richedit?L"RICHEDIT50W":L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,8,70,520,360,hwnd,(HMENU)2005,os_hinstance,NULL);SendMessageW(exif_summary,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(18,18));if(exif_richedit)SendMessageW(exif_summary,EM_SETBKGNDCOLOR,0,exif_bg);}exif_file=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,8,8,400,22,hwnd,(HMENU)2001,os_hinstance,NULL);exif_list=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SHOWSELALWAYS,8,36,520,400,hwnd,(HMENU)2002,os_hinstance,NULL);ListView_SetExtendedListViewStyle(exif_list,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_LABELTIP);ZeroMemory(&col,sizeof(col));col.mask=LVCF_TEXT|LVCF_WIDTH;col.cx=280;col.pszText=L"Field";SendMessageW(exif_list,LVM_INSERTCOLUMNW,0,(LPARAM)&col);col.cx=280;col.pszText=L"Value";SendMessageW(exif_list,LVM_INSERTCOLUMNW,1,(LPARAM)&col);exif_count=CreateWindowExW(0,L"STATIC",L"",WS_CHILD|WS_VISIBLE,8,440,400,22,hwnd,(HMENU)2003,os_hinstance,NULL);exif_copy=CreateWindowExW(0,L"BUTTON",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,430,438,96,26,hwnd,(HMENU)2004,os_hinstance,NULL);{HWND header=ListView_GetHeader(exif_list);exif_old_header_proc=(WNDPROC)SetWindowLongPtrW(header,GWLP_WNDPROC,(LONG_PTR)exif_header_proc);}exif_overview_button=CreateWindowExW(0,L"BUTTON",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,16,90,140,32,hwnd,(HMENU)2011,os_hinstance,NULL);exif_detail_button=CreateWindowExW(0,L"BUTTON",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,160,90,140,32,hwnd,(HMENU)2012,os_hinstance,NULL);return 0;}
+ case WM_SIZE:exif_resize_controls(LOWORD(lp),HIWORD(lp));return 0;
  case WM_CTLCOLOREDIT:
  case WM_CTLCOLORSTATIC:SetTextColor((HDC)wp,ui_text(exif_bg));SetBkMode((HDC)wp,TRANSPARENT);return (LRESULT)exif_brush;
  case WM_ERASEBKGND:{RECT r;GetClientRect(hwnd,&r);FillRect((HDC)wp,&r,exif_brush);return 1;}
@@ -167,9 +219,34 @@ static LRESULT CALLBACK exif_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){switch
  case WM_CLOSE:SendMessageW(GetParent(hwnd),WM_COMMAND,VIV_ID_VIEW_EXIF,0);return 0;
  case WM_DESTROY:if(exif_font)DeleteObject(exif_font);if(exif_heading_font)DeleteObject(exif_heading_font);exif_font=exif_heading_font=NULL;exif_heading=exif_close=NULL;exif_summary=exif_tabs=NULL;exif_hwnd=exif_list=exif_file=exif_count=exif_copy=NULL;return 0;
  }return DefWindowProcW(hwnd,msg,wp,lp);}
-int exif_sidebar_width(HWND owner){RECT r;int width,dpi;HDC dc;if(!config_show_exif)return 0;GetClientRect(owner,&r);dc=GetDC(owner);dpi=GetDeviceCaps(dc,LOGPIXELSY);ReleaseDC(owner,dc);width=MulDiv(340,dpi,96);if(width>(r.right-r.left)/2)width=(r.right-r.left)/2;return width;}
+int exif_sidebar_width(HWND owner)
+{
+    RECT r;
+    if (!config_show_exif)return 0;
+    GetClientRect(owner,&r);
+    return min(exif_scale(340),(r.right-r.left)/2);
+}
 void exif_set_background(COLORREF color){int changed=color!=exif_bg;exif_bg=color;if(!exif_hwnd)return;if(!exif_brush || changed){HBRUSH old=exif_brush;exif_brush=CreateSolidBrush(color);if(old)DeleteObject(old);}if(exif_list){ListView_SetBkColor(exif_list,color);ListView_SetTextBkColor(exif_list,color);ListView_SetTextColor(exif_list,ui_text(color));}if(exif_summary && exif_richedit){CHARRANGE range;CHARFORMAT2W cf;int line=(int)SendMessageW(exif_summary,EM_GETFIRSTVISIBLELINE,0,0);SendMessageW(exif_summary,EM_EXGETSEL,0,(LPARAM)&range);ShowScrollBar(exif_summary,SB_VERT,FALSE);SendMessageW(exif_summary,EM_SETBKGNDCOLOR,0,color);ZeroMemory(&cf,sizeof(cf));cf.cbSize=sizeof(cf);cf.dwMask=CFM_COLOR;cf.crTextColor=ui_text(color);SendMessageW(exif_summary,EM_SETSEL,0,-1);SendMessageW(exif_summary,EM_SETCHARFORMAT,SCF_SELECTION,(LPARAM)&cf);SendMessageW(exif_summary,EM_EXSETSEL,0,(LPARAM)&range);SendMessageW(exif_summary,EM_LINESCROLL,0,line-(int)SendMessageW(exif_summary,EM_GETFIRSTVISIBLELINE,0,0));}if(changed)RedrawWindow(exif_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);}
-void exif_layout(HWND owner,int top,int bottom){RECT r;int width;exif_top=top;exif_bottom=bottom;if(!exif_hwnd)return;if(!config_show_exif){ShowWindow(exif_hwnd,SW_HIDE);return;}GetClientRect(owner,&r);width=exif_sidebar_width(owner);SetWindowPos(exif_hwnd,HWND_TOP,r.right-width,top,width,r.bottom-top-bottom>1?r.bottom-top-bottom:1,SWP_NOACTIVATE|SWP_SHOWWINDOW);}
+void exif_layout(HWND owner,int top,int bottom)
+{
+    RECT r;
+    int width,height;
+    BOOL font_changed;
+    exif_top=top;
+    exif_bottom=bottom;
+    if (!exif_hwnd)return;
+    if (!config_show_exif)
+    {
+        ShowWindow(exif_hwnd,SW_HIDE);
+        return;
+    }
+    GetClientRect(owner,&r);
+    width=exif_sidebar_width(owner);
+    height=max(1,r.bottom-top-bottom);
+    font_changed=exif_refresh_fonts();
+    SetWindowPos(exif_hwnd,HWND_TOP,r.right-width,top,width,height,SWP_NOACTIVATE|SWP_SHOWWINDOW);
+    if (font_changed)exif_resize_controls(width,height);
+}
 void exif_sync(HWND owner,const wchar_t *filename,int force){if(!config_show_exif){if(exif_hwnd)ShowWindow(exif_hwnd,SW_HIDE);return;}if(!exif_hwnd){WNDCLASSW wc;ZeroMemory(&wc,sizeof(wc));wc.hInstance=os_hinstance;wc.lpfnWndProc=exif_proc;wc.lpszClassName=L"fyto.Exif";wc.hCursor=LoadCursor(NULL,IDC_ARROW);if(!exif_brush)exif_brush=CreateSolidBrush(exif_bg);wc.hbrBackground=NULL;RegisterClassW(&wc);exif_hwnd=CreateWindowExW(0,wc.lpszClassName,L"",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,0,0,340,580,owner,(HMENU)2010,os_hinstance,NULL);if(!exif_hwnd)return;force=1;}
  if(force || exif_last_language!=config_language || lstrcmpW(exif_last_path,filename?filename:L"")){load_metadata(filename);wcsncpy_s(exif_last_path,32768,filename?filename:L"",_TRUNCATE);exif_last_language=config_language;}exif_set_background(exif_bg);exif_layout(owner,exif_top,exif_bottom);
 }
