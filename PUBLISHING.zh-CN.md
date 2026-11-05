@@ -1,15 +1,15 @@
 # fyto 构建与发布
 
-项目仓库为 https://github.com/heytoby/fyto，当前版本为 1.0.0.33，标签为 v1.0.0.33。仓库已公开，正式发布可供软件内更新读取。
+项目仓库为 https://github.com/heytoby/fyto，当前版本为 1.0.0.34，标签为 v1.0.0.34。仓库已公开，正式发布可供软件内更新读取。
 
 ## 本地构建
 
-需要 Windows x64、Visual Studio 2022 C++ Build Tools、Windows SDK、.NET SDK 和 .NET Framework 4.8。构建脚本使用 WiX 6.0.2 及同版本 UI 扩展。
+需要 Windows x64、Visual Studio 2022 C++ Build Tools、Windows SDK、.NET SDK 和 .NET Framework 4.8。构建脚本使用 WiX 6.0.2 及同版本 UI 扩展。从 GitHub 检出的源码首次构建时会下载并校验 Adobe 的思源黑体 2.005R，发布源码包已含字体和许可。
 
 在 PowerShell 中运行：
 
 ```powershell
-./scripts/Set-Version.ps1 -Version 1.0.0.33
+./scripts/Set-Version.ps1 -Version 1.0.0.34
 ./scripts/Build-Release.ps1
 ```
 

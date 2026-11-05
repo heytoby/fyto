@@ -4,7 +4,7 @@ root=Path(__file__).resolve().parents[1]
 source=(root/"voidImageViewer/src/viv.c").read_text(encoding="utf-8-sig")
 generated=root/"build/presentation-under-test.h"
 generated.parent.mkdir(parents=True,exist_ok=True)
-generated.write_text("\n\n".join(body(source,name) for name in ["_viv_remember_manual_size","_viv_fit_image_window","_viv_start_first_frame"])+"\n",encoding="utf8")
+generated.write_text("\n\n".join(body(source,name) for name in ["_viv_remember_manual_size","_viv_fit_image_window","_viv_fit_mode_window","_viv_set_view_mode","_viv_start_first_frame"])+"\n",encoding="utf8")
 (root/"build/render-under-test.h").write_text("\n\n".join(body(source,name) for name in ["_viv_render_size_in_area","_viv_get_render_size"])+"\n",encoding="utf8")
 assert "_viv_pending_open_fullscreen" not in source
 assert "_viv_toggle_fullscreen" not in body(source,"_viv_start_first_frame")

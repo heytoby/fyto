@@ -263,6 +263,10 @@ void config_load_settings(void)
     }
     if(config_defaults_version<2){config_mouse_wheel_action=1;config_nav_sort_ascending=1;config_defaults_version=2;}
     if(config_defaults_version<3){config_fill_window=1;config_defaults_version=3;}
+    if(config_defaults_version<4){
+        viv_migrate_default_keys();
+        config_defaults_version=4;
+    }
     // Global defaults apply on first use; loaded display flags remain authoritative.
     config_show_status=0;
     config_show_controls=0;

@@ -6,41 +6,100 @@ static HFONT fyto_hover_font,fyto_hover_caption_font;
 static int fyto_hover_font_dpi;
 static void fyto_hover_layout(const RECT *image,const RECT *canvas,int dpi_x,int dpi_y,fyto_hover_layout_t *out)
 {
-    int pad=MulDiv(12,dpi_x,96),box=MulDiv(32,dpi_y,96),text_h=MulDiv(20,dpi_y,96);
-    int width=image->right-image->left,height=image->bottom-image->top;
+    int pad=MulDiv(12,dpi_x,96),box=MulDiv(40,dpi_y,96),text_h=MulDiv(20,dpi_y,96);
+    int width=image->right-image->left,height=image->bottom-image->top,play_left;
     if(pad<2)pad=2;
     if(box>height-pad*2)box=max(0,height-pad*2);
     if(box>width-pad*2)box=max(0,width-pad*2);
-    SetRect(&out->play,image->left+pad,image->bottom-pad-box,image->left+pad+box,image->bottom-pad);
+    play_left=image->left+(width-box)/2;
+    SetRect(&out->play,play_left,image->bottom-pad-box,play_left+box,image->bottom-pad);
     fyto_caption_filename_rect(canvas,dpi_x,dpi_y,0,&out->filename);
     SetRect(&out->resolution,out->play.right+pad,image->bottom-pad-text_h,image->right-pad,image->bottom-pad);
     if(out->filename.bottom+pad>out->play.top)SetRectEmpty(&out->filename);
     if(out->resolution.left>=out->resolution.right)SetRectEmpty(&out->resolution);
 }
-static void fyto_hover_text_solid(HDC dc,const wchar_t *text,RECT r,UINT flags)
+static int fyto_hover_shadow_radius(int dpi_y)
 {
-    RECT shadow=r;
-    OffsetRect(&shadow,1,1);SetTextColor(dc,RGB(0,0,0));
-    DrawTextW(dc,text,-1,&shadow,flags);
-    SetTextColor(dc,RGB(255,255,255));DrawTextW(dc,text,-1,&r,flags);
+    return max(2,MulDiv(3,dpi_y,96));
 }
-static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE alpha)
+
+static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE alpha,int dpi_y)
 {
-    HDC layer;HBITMAP bitmap;HGDIOBJ old_bitmap,old_font;RECT local;
-    int width=r.right-r.left+1,height=r.bottom-r.top+1;BLENDFUNCTION blend={AC_SRC_OVER,0,0,0};
-    if(!alpha || IsRectEmpty(&r))return;
-    if(alpha==255){fyto_hover_text_solid(dc,text,r,flags);return;}
-    layer=CreateCompatibleDC(dc);if(!layer)return;
-    bitmap=CreateCompatibleBitmap(dc,width,height);
-    if(!bitmap){DeleteDC(layer);return;}
+    int radius=fyto_hover_shadow_radius(dpi_y), span=2*radius+1;
+    int width=r.right-r.left+2*radius, height=r.bottom-r.top+2*radius;
+    HDC layer;
+    HBITMAP bitmap;
+    HGDIOBJ old_bitmap, old_font;
+    BITMAPINFO info={0};
+    DWORD *pixels;
+    BYTE *horizontal;
+    RECT local;
+    int x,y;
+    BLENDFUNCTION blend={AC_SRC_OVER,0,255,AC_SRC_ALPHA};
+
+    if (!alpha || IsRectEmpty(&r))return;
+    layer=CreateCompatibleDC(dc);
+    if (!layer)return;
+
+    info.bmiHeader.biSize=sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth=width;
+    info.bmiHeader.biHeight=-height;
+    info.bmiHeader.biPlanes=1;
+    info.bmiHeader.biBitCount=32;
+    info.bmiHeader.biCompression=BI_RGB;
+    bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,(void **)&pixels,NULL,0);
+    horizontal=bitmap?HeapAlloc(GetProcessHeap(),0,(SIZE_T)width*height):NULL;
+    if (!horizontal)
+    {
+        if (bitmap)DeleteObject(bitmap);
+        DeleteDC(layer);
+        return;
+    }
     old_bitmap=SelectObject(layer,bitmap);
-    old_font=SelectObject(layer,GetCurrentObject(dc,OBJ_FONT));SetBkMode(layer,TRANSPARENT);
-    /* Copy the already painted image, then blend only the text difference. */
-    BitBlt(layer,0,0,width,height,dc,r.left,r.top,SRCCOPY);
-    SetRect(&local,0,0,width-1,height-1);fyto_hover_text_solid(layer,text,local,flags);
-    blend.SourceConstantAlpha=alpha;
-    AlphaBlend(dc,r.left,r.top,width,height,layer,0,0,width,height,blend);
-    SelectObject(layer,old_font);SelectObject(layer,old_bitmap);DeleteObject(bitmap);DeleteDC(layer);
+    old_font=SelectObject(layer,GetCurrentObject(dc,OBJ_FONT));
+    ZeroMemory(pixels,(SIZE_T)width*height*sizeof(*pixels));
+    SetBkMode(layer,TRANSPARENT);
+    SetTextColor(layer,RGB(255,255,255));
+    SetRect(&local,radius,radius,width-radius,height-radius);
+    DrawTextW(layer,text,-1,&local,flags);
+    GdiFlush();
+
+    /* Blur the glyph coverage, then composite the text over the soft shadow. */
+    for (y=0; y<height; y++)
+    {
+        DWORD *row=pixels+(SIZE_T)y*width;
+        BYTE *blur=horizontal+(SIZE_T)y*width;
+        int sum=0;
+        for (x=0; x<=radius && x<width; x++)sum+=(row[x]>>8)&255;
+        for (x=0; x<width; x++)
+        {
+            blur[x]=(BYTE)(sum/span);
+            if (x>=radius)sum-=(row[x-radius]>>8)&255;
+            if (x+radius+1<width)sum+=(row[x+radius+1]>>8)&255;
+        }
+    }
+    for (x=0; x<width; x++)
+    {
+        int sum=0;
+        for (y=0; y<=radius && y<height; y++)sum+=horizontal[(SIZE_T)y*width+x];
+        for (y=0; y<height; y++)
+        {
+            SIZE_T i=(SIZE_T)y*width+x;
+            DWORD foreground=(((pixels[i]>>8)&255)*alpha+127)/255;
+            DWORD shadow=(112*alpha*(sum/span)+32767)/65025;
+            DWORD opacity=foreground+((255-foreground)*shadow+127)/255;
+            pixels[i]=(opacity<<24)|(foreground*0x010101);
+            if (y>=radius)sum-=horizontal[i-(SIZE_T)radius*width];
+            if (y+radius+1<height)sum+=horizontal[i+(SIZE_T)(radius+1)*width];
+        }
+    }
+
+    AlphaBlend(dc,r.left-radius,r.top-radius,width,height,layer,0,0,width,height,blend);
+    SelectObject(layer,old_font);
+    SelectObject(layer,old_bitmap);
+    HeapFree(GetProcessHeap(),0,horizontal);
+    DeleteObject(bitmap);
+    DeleteDC(layer);
 }
 static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wchar_t *filename,
     int image_w,int image_h,int minimal,int playing,BYTE text_alpha,int show_play,int dpi_x,int dpi_y)
@@ -52,18 +111,18 @@ static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wc
         if(fyto_hover_font)DeleteObject(fyto_hover_font);
         if(fyto_hover_caption_font)DeleteObject(fyto_hover_caption_font);
         fyto_hover_font=CreateFontW(-MulDiv(13,dpi_y,96),0,0,0,FW_NORMAL,0,0,0,
-            DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,L"Segoe UI");
+            DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,L"Source Han Sans CN");
         fyto_hover_caption_font=fyto_caption_create_font(dpi_y);fyto_hover_font_dpi=dpi_y;
     }
     old_font=SelectObject(dc,fyto_hover_caption_font?fyto_hover_caption_font:GetStockObject(DEFAULT_GUI_FONT));
     SetBkMode(dc,TRANSPARENT);
     if(minimal && filename)fyto_hover_text(dc,filename,layout.filename,
-        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha);
+        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y);
     SelectObject(dc,fyto_hover_font?fyto_hover_font:GetStockObject(DEFAULT_GUI_FONT));
     swprintf_s(resolution,80,L"%d × %d",image_w,image_h);
-    fyto_hover_text(dc,resolution,layout.resolution,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha);
+    fyto_hover_text(dc,resolution,layout.resolution,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y);
     x=(layout.play.left+layout.play.right)/2;y=(layout.play.top+layout.play.bottom)/2;
-    radius=min(MulDiv(7,dpi_y,96),(layout.play.bottom-layout.play.top)/3);
+    radius=min(MulDiv(10,dpi_y,96),(layout.play.bottom-layout.play.top)/3);
     if(show_play && radius>=2){
         SelectObject(dc,GetStockObject(NULL_PEN));SelectObject(dc,GetStockObject(DC_BRUSH));
         for(pass=0;pass<2;pass++){

@@ -10,3 +10,5 @@ The original copyright and full MIT permission notice are preserved verbatim in 
 The bundled WebP implementation retains its own copyright, license and patent notices in voidImageViewer/libwebp/COPYING and voidImageViewer/libwebp/PATENTS. Binary distributions include these as libwebp-COPYING and libwebp-PATENTS.
 
 The installer includes the original MIT license and third-party notices. Repackaging must keep these notices with the program.
+
+Source Han Sans CN is provided by Adobe under the SIL Open Font License 1.1. The license is included in voidImageViewer/res/SourceHanSans-OFL.txt and in the executable resources.

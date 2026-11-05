@@ -24,7 +24,7 @@ static HMONITOR _viv_fit_monitor;
 static int _viv_fit_box_wide,_viv_fit_box_high;
 static int _viv_frame_count,_viv_image_wide,_viv_image_high,fyto_formats_window;
 static int os_logical_wide=96,os_logical_high=96,config_show_exif,config_show_caption;
-static int config_left_click_action;
+static int config_left_click_action,config_show_menu,config_show_thickframe,config_show_status,config_show_controls;
 static int config_auto_zoom,config_auto_zoom_type;
 static int _viv_frame_position,_viv_frame_looped,_viv_doing,_viv_is_slideshow;
 static unsigned long long _viv_animation_timer_tick_start,_viv_timer_tick;
@@ -119,6 +119,18 @@ static void _viv_command(int id){(void)id;}
 #define CommandLineToArgvW fake_command_args
 #include "../voidImageViewer/src/window_behavior.h"
 #include "../voidImageViewer/src/hover_controls.h"
+static int exif_sidebar_width(HWND hwnd)
+{
+    int width=fake_window.right-fake_window.left;
+    (void)hwnd;
+    return config_show_exif?min(340,width/2):0;
+}
+static void os_MonitorRectFromWindow(HWND hwnd,int fullscreen,RECT *rect)
+{
+    (void)hwnd;
+    *rect=fullscreen?fake_monitor.rcMonitor:fake_monitor.rcWork;
+}
+static void _viv_update_frame(void){}
 #include "../build/presentation-under-test.h"
 
 static int same_rect(const RECT *a,const RECT *b){return !memcmp(a,b,sizeof(*a));}
@@ -154,7 +166,47 @@ static void save_bmp(const char *name,HDC dc,HBITMAP bitmap,int width,int height
     f.bfSize=f.bfOffBits+width*height*4;assert(!fopen_s(&file,name,"wb"));
     fwrite(&f,sizeof(f),1,file);fwrite(&b,sizeof(b),1,file);fwrite(pixels,4,(size_t)width*height,file);fclose(file);
 }
-int main(void){
+static HANDLE verify_embedded_font(const wchar_t *path)
+{
+    FILE *file;
+    BYTE *bytes;
+    long size;
+    DWORD count=0;
+    HANDLE font;
+    HDC dc;
+    HFONT face;
+    HGDIOBJ old;
+    wchar_t name[LF_FACESIZE];
+    WORD glyphs[4];
+
+    assert(!_wfopen_s(&file,path,L"rb"));
+    assert(!fseek(file,0,SEEK_END));
+    size=ftell(file);
+    assert(size>0);
+    rewind(file);
+    bytes=malloc(size);
+    assert(bytes && fread(bytes,1,size,file)==(size_t)size);
+    fclose(file);
+
+    font=AddFontMemResourceEx(bytes,size,NULL,&count);
+    free(bytes);
+    assert(font && count==1);
+    dc=CreateCompatibleDC(NULL);
+    face=fyto_caption_create_font(96);
+    assert(dc && face);
+    old=SelectObject(dc,face);
+    assert(GetTextFaceW(dc,ARRAYSIZE(name),name));
+    assert(wcsstr(name,L"Source Han Sans CN") || wcsstr(name,L"\x601d\x6e90\x9ed1\x4f53"));
+    assert(GetGlyphIndicesW(dc,L"\x6781\x7b80\x6a21\x5f0f",4,glyphs,GGI_MARK_NONEXISTING_GLYPHS)!=GDI_ERROR);
+    assert(glyphs[0]!=0xffff && glyphs[1]!=0xffff && glyphs[2]!=0xffff && glyphs[3]!=0xffff);
+    SelectObject(dc,old);
+    DeleteObject(face);
+    DeleteDC(dc);
+    puts("Source Han Sans private font and Chinese glyphs verified");
+    return font;
+}
+int wmain(int argc,wchar_t **argv){
+    HANDLE font=argc>1?verify_embedded_font(argv[1]):NULL;
     int areas[][2]={{4096,4096},{2560,1392},{1080,1872},{800,552},{3840,2120}};
     int photos[][2]={{6000,4000},{4000,6000},{512,512},{1,1},{12000,1},{1,12000}};
     int a,p,cases=0;fyto_image_fit_t fit;RECT before,work,visible,canvas;POINT point;
@@ -165,6 +217,50 @@ int main(void){
         cases++;
     }
     assert(!fyto_default_display_fit(100,36,10,10,36,0,0,&fit));
+    /* A title row reduces a screen-height picture; minimal mode reuses that height. */
+    reset();
+    SetRect(&fake_monitor.rcWork,0,0,1920,1040);
+    SetRect(&fake_monitor.rcMonitor,0,0,1920,1080);
+    _viv_image_wide=1920;_viv_image_high=1040;
+    fake_window=fake_monitor.rcWork;
+    for (a=0; a<3; a++)
+    {
+        int rw,rh;
+        _viv_set_view_mode(TRUE);
+        assert(config_show_caption && fake_window.left>0 && fake_window.right<1920);
+        _viv_get_render_size(&rw,&rh);
+        assert(rw==fake_window.right-fake_window.left && rh==1040-title_height());
+        _viv_set_view_mode(FALSE);
+        assert(!config_show_caption && same_rect(&fake_window,&fake_monitor.rcWork));
+        _viv_get_render_size(&rw,&rh);
+        assert(rw==1920 && rh==1040);
+        cases++;
+    }
+    reset();
+    fake_window=fake_monitor.rcMonitor;_viv_is_fullscreen=1;
+    _viv_image_wide=2560;_viv_image_high=1440;
+    _viv_set_view_mode(TRUE);
+    assert(!_viv_is_fullscreen && toggles==1 && inside(&fake_window,&fake_monitor.rcWork));
+    assert(fake_window.left>0 && fake_window.right<fake_monitor.rcWork.right);
+    cases++;
+    reset();
+    fake_zoomed=1;fake_window=fake_monitor.rcWork;config_show_caption=1;
+    _viv_set_view_mode(FALSE);
+    assert(fake_zoomed && moves==0 && same_rect(&fake_window,&fake_monitor.rcWork));
+    cases++;
+    reset();
+    fake_arranged=1;SetRect(&fake_window,0,0,1280,1392);before=fake_window;
+    _viv_set_view_mode(TRUE);
+    _viv_set_view_mode(FALSE);
+    assert(fake_arranged && moves==0 && same_rect(&fake_window,&before));
+    cases++;
+    reset();
+    before=fake_window;
+    _viv_set_view_mode(TRUE);
+    _viv_set_view_mode(FALSE);
+    assert(moves==0 && same_rect(&fake_window,&before));
+    cases++;
+
     reset();_viv_fit_image_window();
     assert(fake_window.right-fake_window.left==1392 && fake_window.bottom-fake_window.top==928);cases++;
     reset();_viv_user_sized_window=1;SetRect(&fake_window,200,200,1400,660);before=fake_window;
@@ -288,7 +384,7 @@ int main(void){
         fyto_caption_filename_rect(&work,a,a,0,&title);
         assert(title.left+title.right==work.right&&title.top==0&&title.bottom==MulDiv(36,a,96));
         assert(GetObjectW(handle,sizeof(font),&font)==sizeof(font));assert(font.lfHeight==-MulDiv(10,a,72));
-        assert(!wcscmp(font.lfFaceName,L"Microsoft YaHei UI"));DeleteObject(handle);cases++;
+        assert(!wcscmp(font.lfFaceName,L"Source Han Sans CN"));DeleteObject(handle);cases++;
     }
     {
         fyto_hover_fade_t fade={0};int alpha=0,next;
@@ -333,6 +429,9 @@ int main(void){
             }
             assert(right>left&&abs((left+right)-960)<=5&&abs((top+bottom)-36)<=5);cases++;
         }
+        assert(abs(layout.play.left+layout.play.right-visible.left-visible.right)<=1);
+        assert(layout.play.right-layout.play.left==40);
+        assert(layout.resolution.left>=layout.play.right);
         point.x=(layout.play.left+layout.play.right)/2;point.y=(layout.play.top+layout.play.bottom)/2;
         assert(fyto_hover_input(_viv_hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(point.x,point.y)));
         assert(fyto_hover_input(_viv_hwnd,WM_LBUTTONUP,0,MAKELPARAM(point.x,point.y)));
@@ -358,7 +457,8 @@ int main(void){
         SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);free(clean);free(full);cases++;
     }
     fyto_hover_presentation_destroy();
-    printf("presentation regressions passed: %d groups; unified long-edge sizing, 1980 drag restore, navigation refit, centered captions, text fading and offscreen rendering\n",cases);
+    if (font)RemoveFontMemResourceEx(font);
+    printf("presentation regressions passed: %d groups; mode switching, long-edge sizing, drag restoration and hover controls\n",cases);
     return 0;
 }
 

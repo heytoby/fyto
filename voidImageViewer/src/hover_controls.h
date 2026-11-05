@@ -23,7 +23,7 @@ static void fyto_hover_invalidate(HWND hwnd)
     _viv_viewport_rect(&canvas);fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
     for(i=0;i<3;i++){
         r=i==0?layout.filename:i==1?layout.resolution:layout.play;
-        if(!IsRectEmpty(&r)){InflateRect(&r,1,1);InvalidateRect(hwnd,&r,FALSE);}
+        if(!IsRectEmpty(&r)){int margin=fyto_hover_shadow_radius(os_logical_high);InflateRect(&r,margin,margin);InvalidateRect(hwnd,&r,FALSE);}
     }
 }
 static void fyto_hover_target(HWND hwnd,BYTE hover)

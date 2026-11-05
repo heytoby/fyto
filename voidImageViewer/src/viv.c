@@ -685,6 +685,13 @@ static void _viv_remember_manual_size(void);
 #define FYTO_REFIT_WINDOW (WM_APP+26)
 static BYTE _viv_fitting_window;
 static void _viv_fit_image_window(void);
+static void _viv_set_view_mode(BOOL standard);
+
+static int fyto_toggle_mode_command(void)
+{
+    return config_show_menu || config_show_caption || config_show_controls || config_show_status
+        ? VIV_ID_VIEW_PRESET_1 : VIV_ID_VIEW_PRESET_3;
+}
 static BOOL _viv_window_arranged(HWND hwnd)
 {
     typedef BOOL (WINAPI *is_arranged_t)(HWND);
@@ -1023,14 +1030,14 @@ _viv_default_key_t _viv_default_keys[] =
 	{VIV_ID_VIEW_ONTOP_ALWAYS,CONFIG_KEYFLAG_CTRL | 'T'},
 	{VIV_ID_VIEW_OPTIONS,'O'},
 	{VIV_ID_VIEW_REFRESH,VK_F5},
-	{VIV_ID_SLIDESHOW_PAUSE,VK_SPACE},
+	{VIV_ID_SLIDESHOW_PAUSE,'P'},
 	{VIV_ID_SLIDESHOW_RATE_DEC,VK_DOWN},
 	{VIV_ID_SLIDESHOW_RATE_INC,VK_UP},
 	{VIV_ID_ANIMATION_PLAY_PAUSE,CONFIG_KEYFLAG_CTRL | VK_SPACE},
 	{VIV_ID_ANIMATION_JUMP_FORWARD_MEDIUM,CONFIG_KEYFLAG_CTRL | VK_NEXT},
 	{VIV_ID_ANIMATION_JUMP_BACKWARD_MEDIUM,CONFIG_KEYFLAG_CTRL | VK_PRIOR},
-	{VIV_ID_ANIMATION_FRAME_STEP,CONFIG_KEYFLAG_CTRL | VK_RIGHT},
-	{VIV_ID_ANIMATION_FRAME_PREV,CONFIG_KEYFLAG_CTRL | VK_LEFT},
+	{VIV_ID_EDIT_ROTATE_90,CONFIG_KEYFLAG_CTRL | VK_RIGHT},
+	{VIV_ID_EDIT_ROTATE_270,CONFIG_KEYFLAG_CTRL | VK_LEFT},
 	{VIV_ID_ANIMATION_FRAME_HOME,CONFIG_KEYFLAG_CTRL | VK_HOME},
 	{VIV_ID_ANIMATION_FRAME_END,CONFIG_KEYFLAG_CTRL | VK_END},
 	{VIV_ID_ANIMATION_RATE_DEC,CONFIG_KEYFLAG_CTRL | VK_DOWN},
@@ -1215,6 +1222,7 @@ static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exi
 static COLORREF _viv_exif_background(void){return _viv_is_fullscreen?RGB(config_fullscreen_background_color_r,config_fullscreen_background_color_g,config_fullscreen_background_color_b):RGB(config_windowed_background_color_r,config_windowed_background_color_g,config_windowed_background_color_b);}
 #include "fyto_brand.h"
 #include "fyto_update.h"
+#include "menu_font.h"
 #include "titlebar.h"
 #include "viewer_geometry.h"
 #include "window_behavior.h"
@@ -1968,23 +1976,13 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 			break;
 			
 		case VIV_ID_VIEW_PRESET_1:
-			config_show_menu = 0;
-			config_show_status = 0;
-			config_show_controls = 0;
-			config_show_caption = 0;
-			config_show_thickframe = 0;
-			_viv_update_frame();
+			_viv_set_view_mode(FALSE);
 			break;
 
 		case VIV_ID_VIEW_PRESET_3:
-			config_show_menu = 1;
-			config_show_status = 0;
-			config_show_controls = 0;
-			config_show_caption = 1;
-			config_show_thickframe = 1;
-			_viv_update_frame();
+			_viv_set_view_mode(TRUE);
 			break;
-			
+
 		case VIV_ID_VIEW_REFRESH:
 			_viv_refresh();
 			break;
@@ -2473,11 +2471,11 @@ debug_printf("SWP %d %d %d %d\n",rect.left,rect.top,rect.right - rect.left,rect.
 			break;
 			
 		case VIV_ID_EDIT_ROTATE_270:
-			_viv_edit_rotate(1);
+			if (_viv_frame_count && !is_key_repeat)_viv_edit_rotate(1);
 			break;
 			
 		case VIV_ID_EDIT_ROTATE_90:
-			_viv_edit_rotate(0);
+			if (_viv_frame_count && !is_key_repeat)_viv_edit_rotate(0);
 			break;
 			
 		case VIV_ID_FILE_CLOSE:
@@ -2597,7 +2595,8 @@ static void _viv_paint_empty(HDC dc)
 {
     RECT button = _viv_empty_open_rect(), text;
     COLORREF bg = _viv_exif_background();
-    HGDIOBJ font = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
+    HFONT ui_font=fyto_caption_create_font(os_logical_high);
+    HGDIOBJ font = SelectObject(dc, ui_font?ui_font:GetStockObject(DEFAULT_GUI_FONT));
     const wchar_t *message;
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, ui_text(bg));
@@ -2638,6 +2637,7 @@ static void _viv_paint_empty(HDC dc)
         message = NULL;
     if(message)DrawTextW(dc, message, -1, &text, DT_CENTER|DT_WORDBREAK|DT_NOPREFIX);
     SelectObject(dc, font);
+    if(ui_font)DeleteObject(ui_font);
 }
 
 static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
@@ -3431,9 +3431,20 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 
 			break;
 			
+        case WM_MEASUREITEM:
+            if(fyto_measure_menu(hwnd,(MEASUREITEMSTRUCT *)lParam))return TRUE;
+            break;
+        case WM_DRAWITEM:
+            if(fyto_draw_menu((DRAWITEMSTRUCT *)lParam))return TRUE;
+            break;
+        case WM_MENUCHAR:
+            if(fyto_menu_font)return fyto_menu_mnemonic((HMENU)lParam,LOWORD(wParam));
+            break;
+
 		case WM_CONTEXTMENU:
 		{
 			HMENU hmenu;
+			UINT command;
 			POINT pt;
 			DWORD tpm_flags;
 			
@@ -3455,6 +3466,14 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 			}
 			
 			hmenu = CreatePopupMenu();
+            {
+                int command = fyto_toggle_mode_command();
+                const wchar_t *label = command==VIV_ID_VIEW_PRESET_1
+                    ? (config_language?L"切换极简模式\t1":L"Switch to Minimal Mode\t1")
+                    : (config_language?L"切换标准模式\t1":L"Switch to Standard Mode\t1");
+                AppendMenuW(hmenu,MF_STRING,command,label);
+                AppendMenuW(hmenu,MF_SEPARATOR,0,NULL);
+            }
 			
 			{
 				int i;
@@ -3591,14 +3610,14 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 			
 			_viv_in_popup_menu = 1;
 			
-			TrackPopupMenu(hmenu,tpm_flags,pt.x,pt.y,0,hwnd,0);
+			command = fyto_track_popup(hwnd,hmenu,tpm_flags,pt.x,pt.y);
 
 			// start the hide cursor timer again.
 			_viv_in_popup_menu = 0;
 			_viv_update_show_cursor();
 			
 			DestroyMenu(hmenu);
-			
+			if (command)PostMessage(hwnd,WM_COMMAND,command,0);
 			break;
 		}
 			
@@ -5626,7 +5645,15 @@ static void _viv_kill(void)
 
 static int _viv_main(int nCmdShow)
 {
-    if(fyto_is_setup_sample_launch())return 0;
+    HMODULE module=GetModuleHandleW(NULL);
+    HRSRC resource=FindResourceW(module,L"FYTO_UI_FONT",MAKEINTRESOURCEW(10));
+    HGLOBAL data=resource?LoadResource(module,resource):NULL;
+    DWORD fonts=0;
+    HANDLE private_font=data?AddFontMemResourceEx(LockResource(data),SizeofResource(module,resource),NULL,&fonts):NULL;
+    if(fyto_is_setup_sample_launch()){
+        if(private_font)RemoveFontMemResourceEx(private_font);
+        return 0;
+    }
     // Startup splash disabled by user preference.
 	if (_viv_init(nCmdShow))
 	{
@@ -5658,6 +5685,7 @@ static int _viv_main(int nCmdShow)
 		
 		_viv_kill();
 	}
+    if(private_font)RemoveFontMemResourceEx(private_font);
 
 	return 0;
 }
@@ -6417,7 +6445,7 @@ static int _viv_is_msg(MSG *msg)
 						_viv_update_src_pixel(0,1);
 					}
 */					
-					if(key_flags==0 && msg->wParam=='1'){_viv_command((config_show_menu||config_show_caption||config_show_controls||config_show_status)?VIV_ID_VIEW_PRESET_1:VIV_ID_VIEW_PRESET_3);return 1;}
+					if(key_flags==0 && msg->wParam=='1'){_viv_command(fyto_toggle_mode_command());return 1;}
                     if(key_flags==0 && msg->wParam=='A'){_viv_command(VIV_ID_VIEW_EXIF);return 1;}
                     if ((key_flags == 0) && (msg->wParam == VK_ESCAPE)){PostMessage(_viv_hwnd,WM_CLOSE,0,0);return 1;}
                     // cancel action
@@ -11280,7 +11308,7 @@ static LRESULT CALLBACK _viv_status_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM
 	switch (msg) 
 	{
  case WM_ERASEBKGND:return 1;
- case WM_PAINT:{PAINTSTRUCT ps;RECT r;HGDIOBJ old;int i,count;BeginPaint(hwnd,&ps);GetClientRect(hwnd,&r);ui_fill(ps.hdc,&r,_viv_exif_background());SetTextColor(ps.hdc,ui_text(_viv_exif_background()));SetBkMode(ps.hdc,TRANSPARENT);old=SelectObject(ps.hdc,GetStockObject(DEFAULT_GUI_FONT));count=(int)SendMessage(hwnd,SB_GETPARTS,0,0);for(i=0;i<count;i++){wchar_t text[STRING_SIZE];text[0]=0;SendMessage(hwnd,SB_GETRECT,i,(LPARAM)&r);SendMessageW(hwnd,SB_GETTEXTW,i,(LPARAM)text);r.left+=4;r.right-=4;DrawTextW(ps.hdc,text,-1,&r,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);}SelectObject(ps.hdc,old);EndPaint(hwnd,&ps);return 0;}
+ case WM_PAINT:{PAINTSTRUCT ps;RECT r;HGDIOBJ old;HFONT ui_font=fyto_caption_create_font(os_logical_high);int i,count;BeginPaint(hwnd,&ps);GetClientRect(hwnd,&r);ui_fill(ps.hdc,&r,_viv_exif_background());SetTextColor(ps.hdc,ui_text(_viv_exif_background()));SetBkMode(ps.hdc,TRANSPARENT);old=SelectObject(ps.hdc,ui_font?ui_font:GetStockObject(DEFAULT_GUI_FONT));count=(int)SendMessage(hwnd,SB_GETPARTS,0,0);for(i=0;i<count;i++){wchar_t text[STRING_SIZE];text[0]=0;SendMessage(hwnd,SB_GETRECT,i,(LPARAM)&r);SendMessageW(hwnd,SB_GETTEXTW,i,(LPARAM)text);r.left+=4;r.right-=4;DrawTextW(ps.hdc,text,-1,&r,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);}SelectObject(ps.hdc,old);if(ui_font)DeleteObject(ui_font);EndPaint(hwnd,&ps);return 0;}
 	
 		case WM_LBUTTONDOWN:
 		
@@ -13796,6 +13824,50 @@ static void _viv_do_mousewheel_action(int action,int delta,int x,int y)
  else if(action==1 || action==2){_viv_wheel_delta+=delta;while(_viv_wheel_delta>=WHEEL_DELTA || _viv_wheel_delta<=-WHEEL_DELTA){int positive=_viv_wheel_delta>0;_viv_wheel_delta+=positive?-WHEEL_DELTA:WHEEL_DELTA;_viv_wheel_navigation=1;_viv_next(action==1?positive:!positive,1,0,0);_viv_wheel_navigation=0;}}
 }
 
+void viv_migrate_default_keys(void)
+{
+    static const struct {
+        int previous_command, command;
+        DWORD previous_key, key;
+    } changes[] = {
+        {VIV_ID_SLIDESHOW_PAUSE, VIV_ID_SLIDESHOW_PAUSE, VK_SPACE, 'P'},
+        {VIV_ID_ANIMATION_FRAME_STEP, VIV_ID_EDIT_ROTATE_90,
+            CONFIG_KEYFLAG_CTRL | VK_RIGHT, CONFIG_KEYFLAG_CTRL | VK_RIGHT},
+        {VIV_ID_ANIMATION_FRAME_PREV, VIV_ID_EDIT_ROTATE_270,
+            CONFIG_KEYFLAG_CTRL | VK_LEFT, CONFIG_KEYFLAG_CTRL | VK_LEFT},
+    };
+    int i;
+    for (i=0; i<ARRAYSIZE(changes); i++)
+    {
+        int from = _viv_command_index_from_command_id(changes[i].previous_command);
+        int to = _viv_command_index_from_command_id(changes[i].command);
+        config_key_t *old = _viv_key_list->start[from];
+        config_key_t *current = _viv_key_list->start[to];
+        int j, available = 1;
+
+        if (!old || old->next || old->key != changes[i].previous_key)continue;
+        if (from != to && current && (current->next || current->key != changes[i].key))continue;
+
+        for (j=0; j<_VIV_COMMAND_COUNT && available; j++)
+        {
+            config_key_t *entry;
+            if (j==from || j==to)continue;
+            for (entry=_viv_key_list->start[j]; entry; entry=entry->next)
+            {
+                if (entry->key == changes[i].key)
+                {
+                    available = 0;
+                    break;
+                }
+            }
+        }
+        if (!available)continue;
+
+        _viv_key_clear(_viv_key_list,from);
+        if (from==to || !current)_viv_key_add(_viv_key_list,to,changes[i].key);
+    }
+}
+
 void viv_key_add(int command_index,DWORD keyflags)
 {	
 	_viv_key_add(_viv_key_list,command_index,keyflags);
@@ -14016,6 +14088,83 @@ static void _viv_fit_image_window(void)
     }
     GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);_viv_fit_last_valid=1;
     InvalidateRect(_viv_hwnd,NULL,FALSE);
+}
+
+static void _viv_fit_mode_window(const RECT *original,const RECT *work,BOOL standard)
+{
+    RECT canvas;
+    int width, height, chrome_width, chrome_height, area_width, area_height, x, y;
+    int work_width = work->right-work->left, work_height = work->bottom-work->top;
+    BYTE was_moving = _viv_in_sizemove;
+
+    if (_viv_zoom_pos || _viv_1to1 || IsIconic(_viv_hwnd))return;
+    _viv_viewport_rect(&canvas);
+    area_width = canvas.right-canvas.left;
+    area_height = canvas.bottom-canvas.top;
+    if (standard)
+    {
+        _viv_get_render_size(&width,&height);
+        if (width<=0 || height<=0 || area_width-width<=1)return;
+    }
+    else if (_viv_is_fullscreen || IsZoomed(_viv_hwnd))
+    {
+        // The frame update already exposes the full screen area in these modes.
+        return;
+    }
+
+    chrome_width = exif_sidebar_width(_viv_hwnd);
+    chrome_height = title_height();
+    // A standard window that reaches the top and bottom can grow sideways
+    // as the picture uses the height reclaimed from the title row.
+    if (!standard && original->bottom-original->top>=work_height-2)
+        area_width = work_width-chrome_width;
+    area_width = min(area_width,work_width-chrome_width);
+    area_height = min(area_height,work_height-chrome_height);
+    if (area_width<=0 || area_height<=0)return;
+    _viv_render_size_in_area(area_width,area_height,&width,&height);
+    width = min(width,area_width)+chrome_width;
+    height = min(height,area_height)+chrome_height;
+    x = original->left+(original->right-original->left-width)/2;
+    y = original->top+(original->bottom-original->top-height)/2;
+    x = max(work->left,min(x,work->right-width));
+    y = max(work->top,min(y,work->bottom-height));
+
+    if (x==original->left && y==original->top &&
+        x+width==original->right && y+height==original->bottom)return;
+    _viv_in_sizemove = 1;
+    if (_viv_is_fullscreen)
+    {
+        _viv_fullscreen_is_maxed = 0;
+        _viv_toggle_fullscreen();
+    }
+    if (IsZoomed(_viv_hwnd))ShowWindow(_viv_hwnd,SW_RESTORE);
+
+    _viv_fitting_window = 1;
+    SetWindowPos(_viv_hwnd,NULL,x,y,width,height,SWP_NOZORDER|SWP_NOACTIVATE);
+    _viv_fitting_window = 0;
+    _viv_in_sizemove = was_moving;
+    _viv_user_sized_window = 1;
+    _viv_remember_manual_size();
+    _viv_fit_last_valid = GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);
+}
+
+static void _viv_set_view_mode(BOOL standard)
+{
+    RECT original, work;
+    BOOL refit = _viv_frame_count && (!!config_show_caption!=standard) &&
+        GetWindowRect(_viv_hwnd,&original) &&
+        (_viv_is_fullscreen || IsZoomed(_viv_hwnd) || !_viv_window_arranged(_viv_hwnd)) &&
+        fyto_window_needs_drag_restore(_viv_hwnd);
+    if (refit)os_MonitorRectFromWindow(_viv_hwnd,0,&work);
+
+    config_show_menu = standard;
+    config_show_caption = standard;
+    config_show_thickframe = standard;
+    config_show_status = 0;
+    config_show_controls = 0;
+    _viv_update_frame();
+
+    if (refit)_viv_fit_mode_window(&original,&work,standard);
 }
 
 static void _viv_start_first_frame(void)

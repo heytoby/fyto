@@ -240,6 +240,7 @@ enum
 
 int viv_get_command_count(void);
 int viv_menu_name_to_ini_name(utf8_t *buf,int command_index);
+void viv_migrate_default_keys(void);
 void viv_key_add(int command_index,DWORD keyflags);
 void viv_key_clear_all(int command_index);
 config_key_t *viv_key_get_start(int command_index);
