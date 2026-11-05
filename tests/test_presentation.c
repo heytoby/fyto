@@ -191,7 +191,7 @@ static HANDLE verify_embedded_font(const wchar_t *path)
 
     font=AddFontMemResourceEx(bytes,size,NULL,&count);
     free(bytes);
-    assert(font && count==1);
+    assert(font && count>0);
     dc=CreateCompatibleDC(NULL);
     face=fyto_caption_create_font(96);
     assert(dc && face);

@@ -22,7 +22,7 @@ private final class GlyphButton: NSButton {
         toolTip = label
     }
 
-    required init?(coder: NSCoder) { nil }
+    required init?(coder: NSCoder) { return nil }
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -98,7 +98,7 @@ final class ViewerCanvas: NSView {
     private let filename = NSTextField(labelWithString: "")
     private let resolution = NSTextField(labelWithString: "")
     private let open = NSButton(title: "打开图片", target: nil, action: nil)
-    private let menu = NSButton(title: "菜单", target: nil, action: nil)
+    private let menuButton = NSButton(title: "菜单", target: nil, action: nil)
     private let pin = GlyphButton(.pin, label: "钉住窗口")
     private let minimize = GlyphButton(.minimize, label: "隐藏窗口")
     private let maximize = GlyphButton(.maximize, label: "最大化或恢复窗口")
@@ -140,7 +140,7 @@ final class ViewerCanvas: NSView {
         filename.alignment = .center
         resolution.alignment = .right
         resolution.font = viewerFont(12)
-        for button in [open, menu] {
+        for button in [open, menuButton] {
             button.font = viewerFont(13)
             button.isBordered = false
             button.attributedTitle = NSAttributedString(string: button.title, attributes: [
@@ -149,8 +149,8 @@ final class ViewerCanvas: NSView {
         }
         open.target = self
         open.action = #selector(openFile)
-        menu.target = self
-        menu.action = #selector(showMenu)
+        menuButton.target = self
+        menuButton.action = #selector(showMenu)
         pin.target = self
         pin.action = #selector(pinWindow)
         minimize.target = self
@@ -162,11 +162,11 @@ final class ViewerCanvas: NSView {
         playback.target = self
         playback.action = #selector(play)
         playback.shadowed = true
-        for button in [open, menu, pin, minimize, maximize, close, playback] { addSubview(button) }
+        for button in [open, menuButton, pin, minimize, maximize, close, playback] { addSubview(button) }
         registerForDraggedTypes([.fileURL])
     }
 
-    required init?(coder: NSCoder) { nil }
+    required init?(coder: NSCoder) { return nil }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor(white: 0.11, alpha: 1).setFill()
@@ -200,7 +200,7 @@ final class ViewerCanvas: NSView {
         for (offset, button) in [minimize, maximize, close].enumerated() {
             button.frame = CGRect(x: bounds.width - CGFloat(3 - offset) * slot, y: 0, width: slot, height: titleHeight)
         }
-        menu.frame = CGRect(x: 8, y: 0, width: min(64, max(0, bounds.width - 4 * slot - 8)), height: titleHeight)
+        menuButton.frame = CGRect(x: 8, y: 0, width: min(64, max(0, bounds.width - 4 * slot - 8)), height: titleHeight)
         let margin = min(max(72, 4 * slot + 12), bounds.width / 2)
         filename.frame = CGRect(x: margin, y: 9, width: max(0, bounds.width - 2 * margin), height: 22)
         open.frame = CGRect(x: bounds.midX - 68, y: viewport.midY - 18, width: 136, height: 36)
@@ -229,7 +229,7 @@ final class ViewerCanvas: NSView {
     func refreshControls(animated: Bool = false) {
         let standard = viewer?.standard == true
         let hasPhoto = image.image != nil
-        for button in [menu, minimize, maximize, close] { button.isHidden = !standard }
+        for button in [menuButton, minimize, maximize, close] { button.isHidden = !standard }
         open.isHidden = hasPhoto
         pin.isHidden = !standard && (!hover || !hasPhoto)
         pin.selected = viewer?.pinned == true
@@ -347,6 +347,6 @@ final class ViewerCanvas: NSView {
     @objc private func closeWindow() { viewer?.closeWindow() }
     @objc private func play() { viewer?.togglePlayback() }
     @objc private func showMenu() {
-        viewer?.menu().popUp(positioning: nil, at: CGPoint(x: menu.frame.minX, y: menu.frame.maxY), in: self)
+        viewer?.menu().popUp(positioning: nil, at: CGPoint(x: menuButton.frame.minX, y: menuButton.frame.maxY), in: self)
     }
 }
