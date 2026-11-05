@@ -24,7 +24,7 @@ static HMONITOR _viv_fit_monitor;
 static int _viv_fit_box_wide,_viv_fit_box_high;
 static int _viv_frame_count,_viv_image_wide,_viv_image_high,fyto_formats_window;
 static int os_logical_wide=96,os_logical_high=96,config_show_exif,config_show_caption;
-static int config_left_click_action,config_show_menu,config_show_thickframe,config_show_status,config_show_controls;
+static int config_ontop,config_left_click_action,config_show_menu,config_show_thickframe,config_show_status,config_show_controls;
 static int config_auto_zoom,config_auto_zoom_type;
 static int _viv_frame_position,_viv_frame_looped,_viv_doing,_viv_is_slideshow;
 static unsigned long long _viv_animation_timer_tick_start,_viv_timer_tick;
@@ -42,6 +42,7 @@ static UINT_PTR active_timer;
 #define _VIV_DST_ZOOM_ONE 0
 #define VIV_ID_VIEW_WINDOW_SIZE_50 2000
 #define VIV_ID_SLIDESHOW_PAUSE 1005
+#define VIV_ID_VIEW_ONTOP_ALWAYS 1006
 #define debug_printf(...) ((void)0)
 static int title_height(void){return config_show_caption?36:0;}
 static int _viv_get_status_high(void){return 0;}
@@ -155,7 +156,7 @@ static void reset(void){
     SetRect(&fake_window,100,100,1060,740);fake_restore=fake_window;_viv_fullscreen_rect=fake_window;
     fake_cursor.x=200;fake_cursor.y=200;
     fake_zoomed=fake_iconic=fake_arranged=moves=toggles=native_drags=last_command=capture=occluded=0;
-    fyto_window_drag_pending=fyto_window_drag_from_image=fyto_image_hover=fyto_play_pressed=0;
+    fyto_window_drag_pending=fyto_window_drag_from_image=fyto_image_hover=fyto_hover_pressed=0;config_ontop=0;
     ZeroMemory(&fyto_hover_fade,sizeof(fyto_hover_fade));fake_now=1000;active_timer=0;
     wcscpy_s(current_file.cFileName,MAX_PATH,L"Terrace-light_01.jpg");
 }
@@ -415,7 +416,24 @@ int wmain(int argc,wchar_t **argv){
         fyto_paint_image_hover(dc);assert(!memcmp(clean,pixels,bytes));occluded=0;cases++;
         fake_cursor.x=300;fake_cursor.y=300;fyto_paint_image_hover(dc);
         assert(active_timer==FYTO_HOVER_FADE_TIMER);
-        for(y=0;y<80;y++)assert(!memcmp(clean+y*960,pixels+y*960,960*4));
+        assert(fyto_visible_image_rect(&visible));_viv_viewport_rect(&canvas);fyto_hover_layout(&visible,&canvas,96,96,&layout);
+        assert(!contrast(pixels,clean,960,layout.filename));
+        assert(contrast(pixels,clean,960,layout.pin)>0);
+        point.x=(layout.pin.left+layout.pin.right)/2;point.y=(layout.pin.top+layout.pin.bottom)/2;
+        assert(fyto_hover_input(_viv_hwnd,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(point.x,point.y)));
+        assert(fyto_hover_input(_viv_hwnd,WM_LBUTTONUP,0,MAKELPARAM(point.x,point.y)));
+        assert(last_command==VIV_ID_VIEW_ONTOP_ALWAYS&&!capture);
+        config_ontop=1;
+        {
+            RECT center={point.x-1,point.y-2,point.x+2,point.y+1};
+            unsigned long long outline=contrast(pixels,clean,960,center);
+            memcpy(pixels,clean,bytes);fyto_paint_image_hover(dc);
+            assert(contrast(pixels,clean,960,center)>outline);
+        }
+        config_show_caption=1;
+        assert(fyto_hover_command(point)!=VIV_ID_VIEW_ONTOP_ALWAYS);
+        config_show_caption=0;
+        cases++;
         fake_now+=30;point=fake_cursor;fyto_update_image_hover(point);assert(fyto_hover_fade.started==1000);
         fake_now+=120;fyto_hover_input(_viv_hwnd,WM_TIMER,FYTO_HOVER_FADE_TIMER,0);assert(!active_timer);
         memcpy(pixels,clean,bytes);fyto_paint_image_hover(dc);memcpy(full,pixels,bytes);
@@ -424,7 +442,7 @@ int wmain(int argc,wchar_t **argv){
         assert(fyto_visible_image_rect(&visible));_viv_viewport_rect(&canvas);fyto_hover_layout(&visible,&canvas,96,96,&layout);
         {
             int left=960,right=0,top=640,bottom=0;
-            for(y=0;y<36;y++)for(x=0;x<960;x++)if(clean[y*960+x]!=pixels[y*960+x]){
+            for(y=0;y<36;y++)for(x=layout.filename.left;x<layout.filename.right;x++)if(clean[y*960+x]!=pixels[y*960+x]){
                 left=min(left,x);right=max(right,x);top=min(top,y);bottom=max(bottom,y);
             }
             assert(right>left&&abs((left+right)-960)<=5&&abs((top+bottom)-36)<=5);cases++;

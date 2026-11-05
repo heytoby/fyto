@@ -1,14 +1,19 @@
 #ifndef FYTO_HOVER_PRESENTATION_H
 #define FYTO_HOVER_PRESENTATION_H
 #include "caption_metrics.h"
-typedef struct {RECT filename,play,resolution;} fyto_hover_layout_t;
+#include "pin_icon.h"
+typedef struct {RECT filename,play,resolution,pin;} fyto_hover_layout_t;
 static HFONT fyto_hover_font,fyto_hover_caption_font;
 static int fyto_hover_font_dpi;
 static void fyto_hover_layout(const RECT *image,const RECT *canvas,int dpi_x,int dpi_y,fyto_hover_layout_t *out)
 {
     int pad=MulDiv(12,dpi_x,96),box=MulDiv(40,dpi_y,96),text_h=MulDiv(20,dpi_y,96);
-    int width=image->right-image->left,height=image->bottom-image->top,play_left;
+    int width=image->right-image->left,height=image->bottom-image->top,play_left,pin_box;
     if(pad<2)pad=2;
+    pin_box=min(MulDiv(34,dpi_y,96),min(width-2*pad,height-2*pad));
+    if(pin_box>=MulDiv(16,dpi_y,96))
+        SetRect(&out->pin,image->right-pad-pin_box,image->top+pad,image->right-pad,image->top+pad+pin_box);
+    else SetRectEmpty(&out->pin);
     if(box>height-pad*2)box=max(0,height-pad*2);
     if(box>width-pad*2)box=max(0,width-pad*2);
     play_left=image->left+(width-box)/2;

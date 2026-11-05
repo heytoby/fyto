@@ -9,7 +9,7 @@ static HFONT fyto_caption_create_font(int dpi_y)
 }
 static void fyto_caption_filename_rect(const RECT *canvas,int dpi_x,int dpi_y,int menu_right,RECT *out)
 {
-    int margin=max(menu_right+12,MulDiv(44,dpi_x,96)*3+12);
+    int margin=max(menu_right+12,MulDiv(44,dpi_x,96)*4+12);
     *out=*canvas;out->bottom=min(out->bottom,out->top+fyto_caption_height(dpi_y));
     out->left+=margin;out->right-=margin;
     if(out->right<=out->left)SetRectEmpty(out);

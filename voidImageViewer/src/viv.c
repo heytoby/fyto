@@ -2297,7 +2297,7 @@ debug_printf("SWP %d %d %d %d\n",rect.left,rect.top,rect.right - rect.left,rect.
 			break;
 			
 		case VIV_ID_VIEW_ONTOP_ALWAYS:
-			config_ontop = !config_ontop;
+			config_ontop = config_ontop != 1;
 			_viv_update_ontop();
 			break;
 						
@@ -2644,6 +2644,14 @@ static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam
 {
 if(fyto_hover_input(hwnd,msg,wParam,lParam))return 0;
 if(fyto_window_drag(hwnd,msg,wParam,lParam))return 0;
+if(msg==WM_NCLBUTTONDOWN && wParam==FYTO_TITLE_PIN_HIT){
+    PostMessage(hwnd,WM_COMMAND,VIV_ID_VIEW_ONTOP_ALWAYS,0);
+    return 0;
+}
+if(msg==WM_SETCURSOR && LOWORD(lParam)==FYTO_TITLE_PIN_HIT){
+    SetCursor(LoadCursor(NULL,IDC_HAND));
+    return TRUE;
+}
 if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam==HTMAXBUTTON){_viv_toggle_fullscreen();return 0;}if(wParam==HTMENU){title_popup(hwnd,lParam);return 0;}if(wParam==HTCLOSE || wParam==HTMAXBUTTON || wParam==HTMINBUTTON){PostMessage(hwnd,WM_SYSCOMMAND,wParam==HTCLOSE?SC_CLOSE:wParam==HTMINBUTTON?SC_MINIMIZE:IsZoomed(hwnd)?SC_RESTORE:SC_MAXIMIZE,0);return 0;}}
 	switch (msg) 
 	{
@@ -2693,7 +2701,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
             RECT r;POINT screen,client;int hit;
             screen.x=GET_X_LPARAM(lParam);screen.y=GET_Y_LPARAM(lParam);
             client=screen;ScreenToClient(hwnd,&client);
-            if(fyto_hover_play_hit(client))return HTCLIENT;
+            if(fyto_hover_command(client))return HTCLIENT;
             GetWindowRect(hwnd,&r);
             hit=fyto_resize_hit(&r,screen,max(2,MulDiv(5,os_logical_high,96)),max(8,MulDiv(16,os_logical_high,96)));
             if(fyto_is_resize_hit(hit))return hit;
@@ -4001,7 +4009,13 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 			_viv_exit();
 			return 0;
 		
-		case WM_SYSCOMMAND:	
+		case WM_SYSCOMMAND:
+            if ((wParam&0xfff0)==SC_MINIMIZE && !config_multiple_instances)
+            {
+                // Launching fyto or opening another image restores this window via WM_COPYDATA.
+                ShowWindow(hwnd,SW_HIDE);
+                return 0;
+            }
 			
 			switch(wParam)
 			{
@@ -5451,7 +5465,7 @@ static int _viv_init(int nCmdShow)
 	window_style = WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
 
 	_viv_hwnd = os_CreateWindowEx(
-		0,
+		WS_EX_TOOLWINDOW,
 		"fyto",
 		"fyto",
 		window_style,
@@ -6770,7 +6784,7 @@ debug_printf("toggle fullscreen %d\n",!_viv_is_fullscreen);
 				0);
 
 			fullscreen_hwnd = os_CreateWindowEx(
-				0,
+				WS_EX_TOOLWINDOW,
 				"_VIV_FULLSCREEN",
 				"fyto",
 				WS_POPUP|WS_VISIBLE,
@@ -9779,6 +9793,7 @@ static void _viv_update_frame(void)
 static void _viv_update_ontop(void)
 {
 	int is_top_most;
+	static BYTE displayed_pin;
 	
 	is_top_most = 0;
 	
@@ -9794,6 +9809,11 @@ static void _viv_update_ontop(void)
 	}
 
 	SetWindowPos(_viv_hwnd,is_top_most ? HWND_TOPMOST : HWND_NOTOPMOST,0,0,0,0,SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
+    if (displayed_pin!=(config_ontop==1))
+    {
+        displayed_pin=config_ontop==1;
+        RedrawWindow(_viv_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_FRAME);
+    }
 }
 
 static void _viv_update_prevent_sleep(void)

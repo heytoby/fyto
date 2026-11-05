@@ -1,0 +1,46 @@
+name: Package fyto for Windows and macOS
+
+on:
+  push:
+    branches: ['build/fyto-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build and verify the Windows installer
+        shell: pwsh
+        run: ./scripts/Build-Release.ps1
+      - name: Upload the Windows x64 installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: fyto-Windows-x64
+          path: release-assets/fyto-Setup-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build and verify the universal macOS app
+        shell: bash
+        run: bash macos/Build-App.sh
+      - name: Upload the macOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: fyto-macOS-Universal
+          path: release-assets/fyto-*-macos-universal.zip
+          if-no-files-found: error
+          retention-days: 30
