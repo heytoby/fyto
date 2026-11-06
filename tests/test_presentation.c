@@ -273,6 +273,9 @@ int wmain(int argc,wchar_t **argv){
         cases++;
     }
     assert(!fyto_default_display_fit(100,36,10,10,36,0,0,&fit));
+    assert(!fyto_fixed_tile(-1920,0,0,1040,-1920,0,0,1040,12));
+    assert(fyto_fixed_tile(-1920,0,-960,1040,-1920,0,0,1040,12));
+    cases++;
     /* A title row reduces a screen-height picture; minimal mode reuses that height. */
     reset();
     SetRect(&fake_monitor.rcWork,0,0,1920,1040);

@@ -27,6 +27,7 @@ static int fyto_fixed_tile(int left,int top,int right,int bottom,int work_left,i
     int width=work_right-work_left,height=work_bottom-work_top,columns,rows,column,row,span;
     if(width<=0 || height<=0)return 0;
     for(columns=1;columns<=3;columns++)for(rows=1;rows<=2;rows++)for(span=1;span<=columns;span++){
+        if(rows==1 && span==columns)continue; // The whole work area is screen-filling.
         for(column=0;column+span<=columns;column++)for(row=0;row<rows;row++)
             if(fyto_near_edge(left,work_left+width*column/columns,tolerance) &&
                fyto_near_edge(right,work_left+width*(column+span)/columns,tolerance) &&
