@@ -190,7 +190,7 @@ static void verify_text_rendering(void)
     SetTextColor(dc,RGB(0,0,0));
 
     assert(fyto_text_render(dc,L"命令行选项(&C)",-1,&measured,DT_CALCRECT|DT_SINGLELINE,15));
-    assert(measured.right>70 && measured.right<110);
+    assert(measured.right>50 && measured.right<130);
     assert(fyto_text_render(dc,L"命令行选项(&C)",-1,&area,DT_VCENTER|DT_SINGLELINE,15));
     assert(fyto_text_render(dc,L"Ctrl+F1",-1,&area,DT_VCENTER|DT_SINGLELINE|DT_RIGHT|DT_NOPREFIX,15));
     GdiFlush();
@@ -211,58 +211,9 @@ static void verify_text_rendering(void)
     DeleteDC(dc);
     puts("DirectWrite Chinese menu and shortcut preserve background with grayscale edge coverage");
 }
-static HANDLE verify_embedded_font(const wchar_t *path)
-{
-    FILE *file;
-    BYTE *bytes;
-    long size;
-    DWORD count=0;
-    HANDLE font;
-    HDC dc;
-    HFONT face;
-    HGDIOBJ old;
-    wchar_t name[LF_FACESIZE];
-    WORD glyphs[4];
-
-    assert(!_wfopen_s(&file,path,L"rb"));
-    assert(!fseek(file,0,SEEK_END));
-    size=ftell(file);
-    assert(size>0);
-    rewind(file);
-    bytes=malloc(size);
-    assert(bytes && fread(bytes,1,size,file)==(size_t)size);
-    fclose(file);
-
-    font=AddFontMemResourceEx(bytes,size,NULL,&count);
-    assert(fyto_text_initialize(bytes,(DWORD)size));
-    free(bytes);
-    assert(font && count>0);
-    dc=CreateCompatibleDC(NULL);
-    face=fyto_caption_create_font(96);
-    assert(dc && face);
-    old=SelectObject(dc,face);
-    assert(GetTextFaceW(dc,ARRAYSIZE(name),name));
-    assert(wcsstr(name,L"Source Han Sans CN") || wcsstr(name,L"\x601d\x6e90\x9ed1\x4f53"));
-    assert(GetGlyphIndicesW(dc,L"\x6781\x7b80\x6a21\x5f0f",4,glyphs,GGI_MARK_NONEXISTING_GLYPHS)!=GDI_ERROR);
-    assert(glyphs[0]!=0xffff && glyphs[1]!=0xffff && glyphs[2]!=0xffff && glyphs[3]!=0xffff);
-    SelectObject(dc,old);
-    DeleteObject(face);
-    DeleteDC(dc);
-    for (int dpi=96; dpi<=192; dpi+=24)
-    {
-        LOGFONTW metrics;
-        face=fyto_menu_create_font(dpi);
-        assert(face && GetObjectW(face,sizeof(metrics),&metrics)==sizeof(metrics));
-        assert(metrics.lfHeight==-MulDiv(11,dpi,72));
-        assert(!wcscmp(metrics.lfFaceName,L"Source Han Sans CN"));
-        DeleteObject(face);
-    }
+int wmain(void){
+    assert(fyto_text_initialize());
     verify_text_rendering();
-    puts("Source Han Sans private font, Chinese glyphs and menu scaling verified");
-    return font;
-}
-int wmain(int argc,wchar_t **argv){
-    HANDLE font=argc>1?verify_embedded_font(argv[1]):NULL;
     int areas[][2]={{4096,4096},{2560,1392},{1080,1872},{800,552},{3840,2120}};
     int photos[][2]={{6000,4000},{4000,6000},{512,512},{1,1},{12000,1},{1,12000}};
     int a,p,cases=0;fyto_image_fit_t fit;RECT before,work,visible,canvas;POINT point;
@@ -496,7 +447,7 @@ int wmain(int argc,wchar_t **argv){
         fyto_caption_filename_rect(&work,a,a,0,&title);
         assert(title.left+title.right==work.right&&title.top==0&&title.bottom==MulDiv(36,a,96));
         assert(GetObjectW(handle,sizeof(font),&font)==sizeof(font));assert(font.lfHeight==-MulDiv(10,a,72));
-        assert(!wcscmp(font.lfFaceName,L"Source Han Sans CN"));DeleteObject(handle);cases++;
+        assert(!wcscmp(font.lfFaceName,L"Microsoft YaHei UI"));DeleteObject(handle);cases++;
     }
     {
         fyto_hover_fade_t fade={0};int alpha=0,next;
@@ -600,7 +551,6 @@ int wmain(int argc,wchar_t **argv){
     }
     fyto_hover_presentation_destroy();
     fyto_text_shutdown();
-    if (font)RemoveFontMemResourceEx(font);
     printf("presentation regressions passed: %d groups; mode switching, long-edge sizing, drag restoration and hover controls\n",cases);
     return 0;
 }

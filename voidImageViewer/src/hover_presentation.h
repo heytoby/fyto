@@ -121,7 +121,7 @@ static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wc
         if(fyto_hover_font)DeleteObject(fyto_hover_font);
         if(fyto_hover_caption_font)DeleteObject(fyto_hover_caption_font);
         fyto_hover_font=CreateFontW(-MulDiv(13,dpi_y,96),0,0,0,FW_NORMAL,0,0,0,
-            DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,L"Source Han Sans CN");
+            DEFAULT_CHARSET,0,0,ANTIALIASED_QUALITY,0,L"Microsoft YaHei UI");
         fyto_hover_caption_font=fyto_caption_create_font(dpi_y);fyto_hover_font_dpi=dpi_y;
     }
     old_font=SelectObject(dc,fyto_hover_caption_font?fyto_hover_caption_font:GetStockObject(DEFAULT_GUI_FONT));

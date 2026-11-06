@@ -17,19 +17,7 @@ app="$work/fyto.app"
 resources="$app/Contents/Resources"
 mkdir -p "$app/Contents/MacOS" "$resources"
 
-font="$resources/SourceHanSansCN-Regular.otf"
-font_blob=5e6605995d5cbc432c4273f566a5f2b8c376c682
-bundled_font="$root/voidImageViewer/res/SourceHanSansCN-Regular.otf"
-if [[ -f "$bundled_font" ]] && [[ "$(git hash-object --no-filters -- "$bundled_font")" == "$font_blob" ]]; then
-    cp "$bundled_font" "$font"
-else
-    curl --fail --silent --show-error --location --retry 3 \
-        https://raw.githubusercontent.com/adobe-fonts/source-han-sans/6c709ca72d3d7c46ab42ebecc1a26e7d69595a37/SubsetOTF/CN/SourceHanSansCN-Regular.otf \
-        --output "$font"
-fi
-[[ "$(git hash-object --no-filters -- "$font")" == "$font_blob" ]]
 cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$resources/"
-cp "$root/voidImageViewer/res/SourceHanSans-OFL.txt" "$resources/"
 
 # Preserve the existing logo's proportions when preparing the Finder icon.
 iconset="$work/fyto.iconset"

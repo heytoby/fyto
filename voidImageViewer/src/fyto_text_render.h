@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-BOOL fyto_text_initialize(const void *font_bytes,DWORD font_size);
+BOOL fyto_text_initialize(void);
 void fyto_text_shutdown(void);
 BOOL fyto_text_render(HDC dc,const wchar_t *text,int length,RECT *rect,UINT flags,int pixels);
 

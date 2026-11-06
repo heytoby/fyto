@@ -12,26 +12,13 @@ if(!$msbuild){throw 'Visual Studio C++ Build Tools required'}
 $sdkRoot=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
 $sdk=(Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
 if(!$sdk){throw 'A versioned Windows SDK is required'}
-$fontPath=Join-Path $root 'voidImageViewer/res/SourceHanSansCN-Regular.otf'
-$fontBlob='5e6605995d5cbc432c4273f566a5f2b8c376c682'
-if (!(Test-Path -LiteralPath $fontPath) -or (git hash-object --no-filters -- $fontPath) -ne $fontBlob) {
- $fontUrl='https://raw.githubusercontent.com/adobe-fonts/source-han-sans/6c709ca72d3d7c46ab42ebecc1a26e7d69595a37/SubsetOTF/CN/SourceHanSansCN-Regular.otf'
- $download="$fontPath.download"
- try {
-  Invoke-WebRequest -UseBasicParsing -Uri $fontUrl -OutFile $download
-  if ((git hash-object --no-filters -- $download) -ne $fontBlob) {throw 'Source Han Sans font checksum mismatch'}
-  Move-Item -LiteralPath $download -Destination $fontPath -Force
- } finally {
-  if (Test-Path -LiteralPath $download) {Remove-Item -LiteralPath $download}
- }
-}
 & python (Join-Path $root 'tests/test_playback_contract.py')
 if($LASTEXITCODE -ne 0){throw 'Playback contract check failed'}
 & python (Join-Path $root 'tests/prepare_presentation_test.py')
 if($LASTEXITCODE -ne 0){throw 'Presentation test preparation failed'}
 & $msbuild (Join-Path $root 'tests/presentation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
 if($LASTEXITCODE -ne 0){throw 'Presentation test build failed'}
-& (Join-Path $root 'build/presentation-tests/test_presentation.exe') $fontPath
+& (Join-Path $root 'build/presentation-tests/test_presentation.exe')
 if($LASTEXITCODE -ne 0){throw 'Presentation regression check failed'}
 & $msbuild (Join-Path $root 'tests/primary_display.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
 if($LASTEXITCODE -ne 0){throw 'Primary display test build failed'}
@@ -46,7 +33,6 @@ Copy-Item (Join-Path $root 'LICENSE') $payload
 Copy-Item (Join-Path $root 'voidImageViewer/libwebp/COPYING') (Join-Path $payload 'libwebp-COPYING')
 Copy-Item (Join-Path $root 'voidImageViewer/libwebp/PATENTS') (Join-Path $payload 'libwebp-PATENTS')
 Copy-Item (Join-Path $root 'THIRD_PARTY_NOTICES.md') (Join-Path $payload 'NOTICE.txt')
-Get-Content -Raw (Join-Path $root 'voidImageViewer/res/SourceHanSans-OFL.txt') | Add-Content -Encoding utf8 (Join-Path $payload 'NOTICE.txt')
 Copy-Item (Join-Path $root 'README.md') (Join-Path $payload 'README.txt')
 if($WixDll -and $UiExtension){
  & (Join-Path $root 'voidImageViewer/installer/build-installer.ps1') -WixDll $WixDll -UiExtension $UiExtension -Payload $payload -OutputDirectory $build
@@ -85,7 +71,7 @@ try{
  foreach($file in Get-ChildItem -LiteralPath $root -Recurse -File){
   $relative=$file.FullName.Substring($root.Length+1).Replace('\','/')
   if($relative -match '(^|/)(\.git|\.vs|\.tools|build|release-assets|x64|Release|Debug|__pycache__|\.wix)(/|$)' -or $file.Extension -match '^\.(exe|msi|zip|obj|pdb|pch|res|tlog|log|wixpdb|aps|cache)$'){continue}
-  if($file.Name -in @('fyto.ini','associations.ini','updates.ini')){continue}
+  if($file.Name -in @('fyto.ini','associations.ini','updates.ini','SourceHanSansCN-Regular.otf')){continue}
   [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$file.FullName,$relative,[IO.Compression.CompressionLevel]::Optimal) | Out-Null
  }
 }finally{$archive.Dispose()}

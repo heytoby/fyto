@@ -1,7 +1,8 @@
 import AppKit
-import CoreText
 import ImageIO
 import UniformTypeIdentifiers
+
+func viewerFont(_ size: CGFloat) -> NSFont { NSFont.systemFont(ofSize: size) }
 
 let titleHeight: CGFloat = 36
 let supportedExtensions = Set(["jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff",
@@ -13,16 +14,6 @@ func imageFit(_ size: CGSize, in limit: CGSize, longEdge: CGFloat = .greatestFin
                     longEdge / max(size.width, size.height))
     return CGSize(width: max(1, min(limit.width, longEdge, ceil(size.width * scale))),
                   height: max(1, min(limit.height, longEdge, ceil(size.height * scale))))
-}
-
-func registerViewerFont() {
-    if let url = Bundle.main.url(forResource: "SourceHanSansCN-Regular", withExtension: "otf") {
-        CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-    }
-}
-
-func viewerFont(_ size: CGFloat) -> NSFont {
-    NSFont(name: "SourceHanSansCN-Regular", size: size) ?? NSFont.systemFont(ofSize: size)
 }
 
 struct Photo {
@@ -544,7 +535,6 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
 @main
 enum FytoMain {
     @MainActor static func main() {
-        registerViewerFont()
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
         let arguments = Array(CommandLine.arguments.dropFirst())
@@ -573,7 +563,6 @@ enum FytoMain {
     @MainActor private static func verify(_ application: NSApplication, _ viewer: Fyto) throws {
         precondition(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool == true)
         precondition(application.activationPolicy() == .accessory)
-        precondition(viewerFont(13).fontName == "SourceHanSansCN-Regular")
         let area = CGSize(width: 1100, height: 760)
         let portrait = imageFit(CGSize(width: 2000, height: 4000), in: area, longEdge: 720)
         let landscape = imageFit(CGSize(width: 4000, height: 2000), in: area, longEdge: 720)

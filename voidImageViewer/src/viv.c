@@ -5689,16 +5689,8 @@ static void _viv_kill(void)
 
 static int _viv_main(int nCmdShow)
 {
-    HMODULE module=GetModuleHandleW(NULL);
-    HRSRC resource=FindResourceW(module,L"FYTO_UI_FONT",MAKEINTRESOURCEW(10));
-    HGLOBAL data=resource?LoadResource(module,resource):NULL;
-    DWORD fonts=0;
-    HANDLE private_font=data?AddFontMemResourceEx(LockResource(data),SizeofResource(module,resource),NULL,&fonts):NULL;
-    if(fyto_is_setup_sample_launch()){
-        if(private_font)RemoveFontMemResourceEx(private_font);
-        return 0;
-    }
-    if (data)fyto_text_initialize(LockResource(data),SizeofResource(module,resource));
+    if(fyto_is_setup_sample_launch())return 0;
+    fyto_text_initialize();
     // Startup splash disabled by user preference.
 	if (_viv_init(nCmdShow))
 	{
@@ -5731,7 +5723,6 @@ static int _viv_main(int nCmdShow)
 		_viv_kill();
 	}
     fyto_text_shutdown();
-    if(private_font)RemoveFontMemResourceEx(private_font);
 
 	return 0;
 }

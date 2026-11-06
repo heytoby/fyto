@@ -1,6 +1,6 @@
 #include <windows.h>
 #include <d2d1.h>
-#include <dwrite_3.h>
+#include <dwrite.h>
 #include "fyto_text_render.h"
 
 template<class T> static void release(T *&value)
@@ -9,9 +9,7 @@ template<class T> static void release(T *&value)
     value=nullptr;
 }
 
-static IDWriteFactory5 *write_factory;
-static IDWriteInMemoryFontFileLoader *font_loader;
-static IDWriteFontCollection1 *font_collection;
+static IDWriteFactory *write_factory;
 static IDWriteRenderingParams *rendering_params;
 static ID2D1Factory *draw_factory;
 static ID2D1DCRenderTarget *draw_target;
@@ -19,7 +17,7 @@ static ID2D1SolidColorBrush *ink;
 static HDC layer;
 static HBITMAP layer_bitmap;
 static SIZE layer_size;
-static const wchar_t font_family[]=L"Source Han Sans CN";
+static const wchar_t font_family[]=L"Segoe UI";
 
 static void release_target()
 {
@@ -37,51 +35,20 @@ void fyto_text_shutdown()
     layer_size={};
     release(draw_factory);
     release(rendering_params);
-    release(font_collection);
-    if (font_loader)write_factory->UnregisterFontFileLoader(font_loader);
-    release(font_loader);
     release(write_factory);
 }
 
-BOOL fyto_text_initialize(const void *font_bytes,DWORD font_size)
+BOOL fyto_text_initialize()
 {
-    IDWriteFactory *factory=nullptr;
-    IDWriteFontFile *file=nullptr;
-    IDWriteFontSetBuilder1 *builder=nullptr;
-    IDWriteFontSet *fonts=nullptr;
-    UINT32 family_index;
-    BOOL family_found=FALSE;
-    HRESULT hr;
-
-    if (font_collection)return TRUE;
-    if (!font_bytes || !font_size)return FALSE;
-    hr=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),
-        reinterpret_cast<IUnknown **>(&factory));
-    if (SUCCEEDED(hr))hr=factory->QueryInterface(IID_PPV_ARGS(&write_factory));
-    if (SUCCEEDED(hr))hr=write_factory->CreateInMemoryFontFileLoader(&font_loader);
+    if (write_factory)return TRUE;
+    HRESULT hr=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown **>(&write_factory));
     if (SUCCEEDED(hr))
-    {
-        hr=write_factory->RegisterFontFileLoader(font_loader);
-        if (FAILED(hr))release(font_loader);
-    }
-    if (SUCCEEDED(hr))
-        hr=font_loader->CreateInMemoryFontFileReference(write_factory,font_bytes,font_size,nullptr,&file);
-    if (SUCCEEDED(hr))hr=write_factory->CreateFontSetBuilder(&builder);
-    if (SUCCEEDED(hr))hr=builder->AddFontFile(file);
-    if (SUCCEEDED(hr))hr=builder->CreateFontSet(&fonts);
-    if (SUCCEEDED(hr))hr=write_factory->CreateFontCollectionFromFontSet(fonts,&font_collection);
-    if (SUCCEEDED(hr))hr=font_collection->FindFamilyName(font_family,&family_index,&family_found);
-    if (SUCCEEDED(hr))
-        hr=factory->CreateCustomRenderingParams(1.8f,0.6f,0.0f,DWRITE_PIXEL_GEOMETRY_FLAT,
+        hr=write_factory->CreateCustomRenderingParams(1.8f,0.6f,0.0f,DWRITE_PIXEL_GEOMETRY_FLAT,
             DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,&rendering_params);
     if (SUCCEEDED(hr))hr=D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,&draw_factory);
-
-    release(fonts);
-    release(builder);
-    release(file);
-    release(factory);
-    if (FAILED(hr) || !family_found)fyto_text_shutdown();
-    return font_collection!=nullptr;
+    if (FAILED(hr))fyto_text_shutdown();
+    return SUCCEEDED(hr);
 }
 
 static HRESULT make_target()
@@ -146,7 +113,7 @@ static HRESULT make_layout(const wchar_t *text,UINT32 length,UINT flags,int pixe
         text=label;
         length=out;
     }
-    hr=write_factory->CreateTextFormat(font_family,font_collection,DWRITE_FONT_WEIGHT_NORMAL,
+    hr=write_factory->CreateTextFormat(font_family,nullptr,DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,static_cast<float>(pixels),L"zh-CN",&format);
     if (SUCCEEDED(hr))hr=format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     if (SUCCEEDED(hr) && flags&DT_VCENTER)
@@ -173,7 +140,7 @@ BOOL fyto_text_render(HDC dc,const wchar_t *text,int length,RECT *rect,UINT flag
     BOOL measure=(flags&DT_CALCRECT)!=0;
     HRESULT hr;
 
-    if (!font_collection || !text || pixels<=0)return FALSE;
+    if (!write_factory || !text || pixels<=0)return FALSE;
     if (!measure && IsRectEmpty(rect))return TRUE;
     if (length<0)length=lstrlenW(text);
     hr=make_layout(text,static_cast<UINT32>(length),flags,pixels,

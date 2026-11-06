@@ -4,7 +4,7 @@
 
 ## 本地构建
 
-Windows 构建需要 Visual Studio 2022 C++ Build Tools、Windows SDK、.NET SDK 和 .NET Framework 4.8，安装包使用 WiX 6.0.2。首次构建会下载并校验 Adobe 思源黑体。运行 `scripts/Build-Release.ps1` 后，在 release-assets 中取得 MSI、兼容旧版更新器的 EXE、安装 ZIP、源码包及 SHA256SUMS.txt。Mac 构建使用 Xcode 命令行工具执行 `macos/Build-App.sh`。
+Windows 构建需要 Visual Studio 2022 C++ Build Tools、Windows SDK、.NET SDK 和 .NET Framework 4.8，安装包使用 WiX 6.0.2。运行 `scripts/Build-Release.ps1` 后，在 release-assets 中取得 MSI、兼容旧版更新器的 EXE、安装 ZIP、源码包及 SHA256SUMS.txt。Mac 构建使用 Xcode 命令行工具执行 `macos/Build-App.sh`。
 
 ## GitHub 发布
 

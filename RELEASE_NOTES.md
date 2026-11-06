@@ -1,3 +1,3 @@
-# fyto 1.0.0.41
+# fyto 1.0.0.42
 
-切换极简与标准模式时，窗口按切换前的图片位置收边。普通窗口移除标题栏后，图片留在原来的屏幕位置。图片撑到显示器边缘时，切换模式会在可用显示区域内重新贴合图片。
+Use system fonts on Windows and macOS to reduce installer size.

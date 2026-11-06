@@ -13,7 +13,7 @@ static int fyto_menu_font_pixels(int dpi_y){return MulDiv(11,dpi_y,72);}
 static HFONT fyto_create_ui_font(int pixels)
 {
     return CreateFontW(-pixels,0,0,0,FW_NORMAL,0,0,0,
-        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Source Han Sans CN");
+        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
 }
 static HFONT fyto_caption_create_font(int dpi_y)
 {

@@ -188,7 +188,7 @@ static BOOL exif_refresh_fonts(void)
     if (exif_font && exif_font_dpi==os_logical_high)return FALSE;
     font=fyto_caption_create_font(os_logical_high);
     heading=CreateFontW(-MulDiv(12,os_logical_high,72),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,
-        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Source Han Sans CN");
+        DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
     if (!font || !heading)
     {
         if (font)DeleteObject(font);

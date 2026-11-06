@@ -219,7 +219,7 @@ static void fyto_format_dialog(HWND owner)
 #pragma pack(pop)
     if(fyto_formats_window && IsWindow(fyto_formats_window)){SetForegroundWindow(fyto_formats_window);return;}
     ZeroMemory(&data,sizeof(data));data.dlg.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME|DS_CENTER|DS_SETFONT;data.dlg.cx=376;data.dlg.cy=324;
-    data.point=9;lstrcpyW(data.font,L"Source Han Sans CN");
+    data.point=9;lstrcpyW(data.font,L"Microsoft YaHei UI");
     // Mark only inside the displayed dialog, allowing a retry after creation failure.
     DialogBoxIndirectParamW(GetModuleHandleW(NULL),&data.dlg,owner,fyto_formats_proc,0);
     fyto_formats_window=NULL;
