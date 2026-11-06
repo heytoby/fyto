@@ -103,9 +103,9 @@ static BOOL fyto_measure_menu(HWND hwnd,MEASUREITEMSTRUCT *measure)
     if (!dc)return FALSE;
     old = SelectObject(dc,fyto_menu_font);
     length = fyto_menu_label_length(item);
-    DrawTextW(dc,item->text,length,&label,DT_SINGLELINE | DT_CALCRECT);
+    fyto_draw_ui_text(dc,item->text,length,&label,DT_SINGLELINE | DT_CALCRECT,fyto_menu_font_pixels(os_logical_high));
     if (item->text[length])
-        DrawTextW(dc,item->text+length+1,-1,&shortcut,DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+        fyto_draw_ui_text(dc,item->text+length+1,-1,&shortcut,DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX,fyto_menu_font_pixels(os_logical_high));
     SelectObject(dc,old);
     ReleaseDC(hwnd,dc);
 
@@ -142,9 +142,9 @@ static BOOL fyto_draw_menu(DRAWITEMSTRUCT *draw)
     text.left += MulDiv(22,os_logical_wide,96);
     text.right -= MulDiv(18,os_logical_wide,96);
     length = fyto_menu_label_length(item);
-    DrawTextW(dc,item->text,length,&text,flags);
+    fyto_draw_ui_text(dc,item->text,length,&text,flags,fyto_menu_font_pixels(os_logical_high));
     if (item->text[length])
-        DrawTextW(dc,item->text+length+1,-1,&text,flags | DT_RIGHT | DT_NOPREFIX);
+        fyto_draw_ui_text(dc,item->text+length+1,-1,&text,flags | DT_RIGHT | DT_NOPREFIX,fyto_menu_font_pixels(os_logical_high));
 
     info.fMask = MIIM_FTYPE | MIIM_SUBMENU | MIIM_STATE;
     GetMenuItemInfoW(item->menu,item->position,TRUE,&info);

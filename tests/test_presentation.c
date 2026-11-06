@@ -167,6 +167,50 @@ static void save_bmp(const char *name,HDC dc,HBITMAP bitmap,int width,int height
     f.bfSize=f.bfOffBits+width*height*4;assert(!fopen_s(&file,name,"wb"));
     fwrite(&f,sizeof(f),1,file);fwrite(&b,sizeof(b),1,file);fwrite(pixels,4,(size_t)width*height,file);fclose(file);
 }
+static void verify_text_rendering(void)
+{
+    enum {width=240,height=32};
+    BITMAPINFO info={0};
+    HDC dc=CreateCompatibleDC(NULL);
+    HBITMAP bitmap;
+    HGDIOBJ previous;
+    DWORD *pixels;
+    RECT area={0,0,width,height},measured={0};
+    int left=0,right=0,edges=0;
+
+    info.bmiHeader.biSize=sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth=width;
+    info.bmiHeader.biHeight=-height;
+    info.bmiHeader.biPlanes=1;
+    info.bmiHeader.biBitCount=32;
+    bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,(void **)&pixels,NULL,0);
+    assert(dc && bitmap);
+    previous=SelectObject(dc,bitmap);
+    for (int i=0; i<width*height; i++)pixels[i]=0x00eeeeee;
+    SetTextColor(dc,RGB(0,0,0));
+
+    assert(fyto_text_render(dc,L"命令行选项(&C)",-1,&measured,DT_CALCRECT|DT_SINGLELINE,15));
+    assert(measured.right>70 && measured.right<110);
+    assert(fyto_text_render(dc,L"命令行选项(&C)",-1,&area,DT_VCENTER|DT_SINGLELINE,15));
+    assert(fyto_text_render(dc,L"Ctrl+F1",-1,&area,DT_VCENTER|DT_SINGLELINE|DT_RIGHT|DT_NOPREFIX,15));
+    GdiFlush();
+    assert((pixels[width-1]&0x00ffffff)==0x00eeeeee);
+    for (int y=0; y<height; y++)
+        for (int x=0; x<width; x++)
+        {
+            DWORD rgb=pixels[y*width+x]&0x00ffffff;
+            if (rgb==0x00eeeeee)continue;
+            assert(rgb==(rgb&255)*0x010101);
+            if (x<width/2)left++;
+            else right++;
+            if (rgb>0 && rgb<0x00eeeeee)edges++;
+        }
+    assert(left>150 && right>70 && edges>80);
+    SelectObject(dc,previous);
+    DeleteObject(bitmap);
+    DeleteDC(dc);
+    puts("DirectWrite Chinese menu and shortcut preserve background with grayscale edge coverage");
+}
 static HANDLE verify_embedded_font(const wchar_t *path)
 {
     FILE *file;
@@ -190,6 +234,7 @@ static HANDLE verify_embedded_font(const wchar_t *path)
     fclose(file);
 
     font=AddFontMemResourceEx(bytes,size,NULL,&count);
+    assert(fyto_text_initialize(bytes,(DWORD)size));
     free(bytes);
     assert(font && count>0);
     dc=CreateCompatibleDC(NULL);
@@ -212,6 +257,7 @@ static HANDLE verify_embedded_font(const wchar_t *path)
         assert(!wcscmp(metrics.lfFaceName,L"Source Han Sans CN"));
         DeleteObject(face);
     }
+    verify_text_rendering();
     puts("Source Han Sans private font, Chinese glyphs and menu scaling verified");
     return font;
 }
@@ -497,6 +543,7 @@ int wmain(int argc,wchar_t **argv){
         SelectObject(dc,old);DeleteObject(bitmap);DeleteDC(dc);free(clean);free(full);cases++;
     }
     fyto_hover_presentation_destroy();
+    fyto_text_shutdown();
     if (font)RemoveFontMemResourceEx(font);
     printf("presentation regressions passed: %d groups; mode switching, long-edge sizing, drag restoration and hover controls\n",cases);
     return 0;

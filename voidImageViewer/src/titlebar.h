@@ -66,12 +66,12 @@ static void title_paint(HWND hwnd)
     title_compact=width<MulDiv(820,os_logical_wide,96);
     for (i=0; i<title_menu_count; i++)
     {
-        SIZE size;
+        RECT size={0};
         title_label(i,label,ARRAYSIZE(label));
-        GetTextExtentPoint32W(dc,label,(int)wcslen(label),&size);
+        fyto_draw_ui_text(dc,label,-1,&size,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX,fyto_menu_font_pixels(os_logical_high));
         title_menu_rects[i]=bar;
         title_menu_rects[i].left=x;
-        x+=size.cx+padding;
+        x+=size.right+padding;
         title_menu_rects[i].right=x;
     }
     if (x>width/2-MulDiv(100,os_logical_wide,96))title_compact=1;
@@ -80,21 +80,21 @@ static void title_paint(HWND hwnd)
         r=bar;
         r.left=margin;
         r.right=MulDiv(84,os_logical_wide,96);
-        DrawTextW(dc,config_language?L"菜单":L"Menu",-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+        fyto_draw_ui_text(dc,config_language?L"菜单":L"Menu",-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX,fyto_menu_font_pixels(os_logical_high));
         x=MulDiv(88,os_logical_wide,96);
     }
     else for (i=0; i<title_menu_count; i++)
     {
         title_label(i,label,ARRAYSIZE(label));
         r=title_menu_rects[i];
-        DrawTextW(dc,label,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+        fyto_draw_ui_text(dc,label,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX,fyto_menu_font_pixels(os_logical_high));
     }
 
     SelectObject(dc,title_font);
     fyto_caption_filename_rect(&bar,os_logical_wide,os_logical_high,x,&r);
     GetWindowTextW(hwnd,filename,STRING_SIZE);
     if (r.right>r.left)
-        DrawTextW(dc,filename,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
+        fyto_draw_ui_text(dc,filename,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX,fyto_caption_font_pixels(os_logical_high));
     r=bar;
     r.left=width-4*button;
     r.right=r.left+button;

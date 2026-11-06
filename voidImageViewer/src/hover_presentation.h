@@ -33,7 +33,7 @@ static int fyto_hover_shadow_radius(int dpi_y)
     return max(2,MulDiv(3,dpi_y,96));
 }
 
-static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE alpha,int dpi_y)
+static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE alpha,int dpi_y,int font_pixels)
 {
     int radius=fyto_hover_shadow_radius(dpi_y), span=2*radius+1;
     int width=r.right-r.left+2*radius, height=r.bottom-r.top+2*radius;
@@ -71,7 +71,7 @@ static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE al
     SetBkMode(layer,TRANSPARENT);
     SetTextColor(layer,RGB(255,255,255));
     SetRect(&local,radius,radius,width-radius,height-radius);
-    DrawTextW(layer,text,-1,&local,flags);
+    fyto_draw_ui_text(layer,text,-1,&local,flags,font_pixels);
     GdiFlush();
 
     /* Blur the glyph coverage, then composite the text over the soft shadow. */
@@ -127,10 +127,10 @@ static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wc
     old_font=SelectObject(dc,fyto_hover_caption_font?fyto_hover_caption_font:GetStockObject(DEFAULT_GUI_FONT));
     SetBkMode(dc,TRANSPARENT);
     if(minimal && filename)fyto_hover_text(dc,filename,layout.filename,
-        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y);
+        DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y,fyto_caption_font_pixels(dpi_y));
     SelectObject(dc,fyto_hover_font?fyto_hover_font:GetStockObject(DEFAULT_GUI_FONT));
     swprintf_s(resolution,80,L"%d × %d",image_w,image_h);
-    fyto_hover_text(dc,resolution,layout.resolution,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y);
+    fyto_hover_text(dc,resolution,layout.resolution,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y,MulDiv(13,dpi_y,96));
     x=(layout.play.left+layout.play.right)/2;y=(layout.play.top+layout.play.bottom)/2;
     radius=min(MulDiv(10,dpi_y,96),(layout.play.bottom-layout.play.top)/3);
     if(show_play && radius>=2){

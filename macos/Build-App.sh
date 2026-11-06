@@ -62,4 +62,20 @@ codesign --verify --deep --strict "$app"
 archive="$root/release-assets/fyto-$version-macos-universal.zip"
 ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
 "$app/Contents/MacOS/fyto" --verify-update-archive "$archive"
-shasum -a 256 "$archive"
+
+dmg="$root/release-assets/fyto-$version-macos-universal.dmg"
+dmg_source="$work/dmg-source"
+dmg_mount="$work/dmg-mount"
+mkdir -p "$dmg_source" "$dmg_mount"
+ditto "$app" "$dmg_source/fyto.app"
+ln -s /Applications "$dmg_source/Applications"
+hdiutil create -volname "fyto" -srcfolder "$dmg_source" -fs HFS+ -format UDZO "$dmg"
+hdiutil verify "$dmg"
+hdiutil attach -readonly -nobrowse -mountpoint "$dmg_mount" "$dmg"
+trap 'hdiutil detach "$dmg_mount"' EXIT
+test "$(readlink "$dmg_mount/Applications")" = /Applications
+codesign --verify --deep --strict "$dmg_mount/fyto.app"
+cmp "$app/Contents/MacOS/fyto" "$dmg_mount/fyto.app/Contents/MacOS/fyto"
+hdiutil detach "$dmg_mount"
+trap - EXIT
+shasum -a 256 "$archive" "$dmg"

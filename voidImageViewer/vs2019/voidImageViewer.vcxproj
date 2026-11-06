@@ -1522,6 +1522,9 @@
       </LinkTimeCodeGeneration>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
+    <Link><AdditionalDependencies>dwrite.lib;d2d1.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\libwebp\src\dec\alpha_dec.c" />
     <ClCompile Include="..\libwebp\src\dec\buffer_dec.c" />
@@ -1613,6 +1616,7 @@
     <ClCompile Include="..\libwebp\src\utils\thread_utils.c" />
     <ClCompile Include="..\libwebp\src\utils\utils.c" />
     <ClCompile Include="..\src\exif.c" />
+    <ClCompile Include="..\src\fyto_text_render.cpp"><CompileAs>CompileAsCpp</CompileAs></ClCompile>
     <ClCompile Include="..\src\config.c" />
     <ClCompile Include="..\src\debug.c" />
     <ClCompile Include="..\src\ini.c" />

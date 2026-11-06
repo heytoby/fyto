@@ -5698,6 +5698,7 @@ static int _viv_main(int nCmdShow)
         if(private_font)RemoveFontMemResourceEx(private_font);
         return 0;
     }
+    if (data)fyto_text_initialize(LockResource(data),SizeofResource(module,resource));
     // Startup splash disabled by user preference.
 	if (_viv_init(nCmdShow))
 	{
@@ -5729,6 +5730,7 @@ static int _viv_main(int nCmdShow)
 		
 		_viv_kill();
 	}
+    fyto_text_shutdown();
     if(private_font)RemoveFontMemResourceEx(private_font);
 
 	return 0;

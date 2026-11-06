@@ -42,6 +42,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fyto-macOS-Universal
-          path: release-assets/fyto-*-macos-universal.zip
+          path: |
+            release-assets/fyto-*-macos-universal.zip
+            release-assets/fyto-*-macos-universal.dmg
           if-no-files-found: error
           retention-days: 30

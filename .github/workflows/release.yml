@@ -87,10 +87,11 @@ jobs:
           FYTO_VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           mac="fyto-$FYTO_VERSION-macos-universal.zip"
+          dmg="fyto-$FYTO_VERSION-macos-universal.dmg"
           (
             cd release-assets
             sed -i 's/\r$//' SHA256SUMS.txt
-            sha256sum "$mac" >> SHA256SUMS.txt
+            sha256sum "$mac" "$dmg" >> SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
           assets=(
@@ -98,6 +99,7 @@ jobs:
             "release-assets/fyto-Setup-$FYTO_VERSION.zip"
             "release-assets/fyto-source-$FYTO_VERSION.zip"
             "release-assets/$mac"
+            "release-assets/$dmg"
             "release-assets/SHA256SUMS.txt"
           )
           gh release create "$FYTO_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \

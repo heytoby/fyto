@@ -6,7 +6,7 @@
 
 ## 安装和使用
 
-Windows 10/11 x64 使用安装程序。macOS 12 及以上使用 Universal ZIP，解压后打开 fyto.app，同一份包支持 Apple 芯片和 Intel。
+Windows 10/11 x64 使用安装程序。macOS 12 及以上可下载 Universal DMG，打开后把 fyto.app 拖入「应用程序」。同一份包支持 Apple 芯片和 Intel，应用内更新使用 Universal ZIP。
 
 标准模式的图钉位于右上角最小化键左侧。极简模式下，鼠标滑过图片时图钉会出现在图片右上角。白色线框表示普通窗口，实心白色表示已置顶。Windows 任务栏和 macOS Dock 均隐藏运行图标。再次启动 fyto 或打开图片可找回已隐藏的窗口。
 
