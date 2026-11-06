@@ -6957,11 +6957,10 @@ static void _viv_slideshow(void)
 	}
 }
 
-static void _viv_render_size_in_area(int wide,int high,int *prw,int *prh)
+static void _viv_render_size_in_area(int wide,int high,int fill_window,int *prw,int *prh)
 {
 	int rw;
 	int rh;
-	int fill_window;
 	int max_zoom_wide;
 	int max_zoom_high;
 	
@@ -7003,15 +7002,6 @@ static void _viv_render_size_in_area(int wide,int high,int *prw,int *prh)
   return;
  }
 
-	if (_viv_is_fullscreen)
-	{
-		fill_window = config_fullscreen_fill_window;
-	}
-	else
-	{
-		fill_window = config_fill_window;
-	}
-	
 	if (config_keep_aspect_ratio)
 	{
 		if ((high * _viv_image_wide) / _viv_image_high < wide)
@@ -7144,7 +7134,8 @@ static void _viv_render_size_in_area(int wide,int high,int *prw,int *prh)
 static void _viv_get_render_size(int *prw,int *prh)
 {
     RECT rect;_viv_viewport_rect(&rect);
-    _viv_render_size_in_area(rect.right-rect.left,rect.bottom-rect.top-_viv_get_status_high()-_viv_get_controls_high(),prw,prh);
+    int fill_window=_viv_is_fullscreen?config_fullscreen_fill_window:config_fill_window;
+    _viv_render_size_in_area(rect.right-rect.left,rect.bottom-rect.top-_viv_get_status_high()-_viv_get_controls_high(),fill_window,prw,prh);
 }
 
 static void _viv_set_custom_rate(void)
@@ -14142,81 +14133,99 @@ static void _viv_fit_image_window(void)
     InvalidateRect(_viv_hwnd,NULL,FALSE);
 }
 
-static void _viv_fit_mode_window(const RECT *original,const RECT *work,BOOL standard)
+static void _viv_fit_mode_window(const RECT *original,const RECT *photo,const RECT *work,BOOL screen_filling,BOOL standard)
 {
-    RECT canvas;
-    int width, height, chrome_width, chrome_height, area_width, area_height, x, y;
-    int work_width = work->right-work->left, work_height = work->bottom-work->top;
-    BYTE was_moving = _viv_in_sizemove;
+    int width,height,area_width,area_height,x,y;
+    int work_width=work->right-work->left,work_height=work->bottom-work->top;
+    int chrome_height=title_height();
+    int sidebar_limit=config_show_exif?MulDiv(340,os_logical_high,96):0;
+    int photo_width=photo->right-photo->left,photo_height=photo->bottom-photo->top;
+    int tolerance=max(2,MulDiv(2,os_logical_high,96));
+    BOOL full_frame=_viv_is_fullscreen || IsZoomed(_viv_hwnd);
+    BYTE was_moving=_viv_in_sizemove,was_fitting=_viv_fitting_window;
+    RECT target;
 
-    if (_viv_zoom_pos || _viv_1to1 || IsIconic(_viv_hwnd))return;
-    _viv_viewport_rect(&canvas);
-    area_width = canvas.right-canvas.left;
-    area_height = canvas.bottom-canvas.top;
-    if (standard)
+    if (full_frame)
     {
+        RECT viewport;
+        _viv_viewport_rect(&viewport);
         _viv_get_render_size(&width,&height);
-        if (width<=0 || height<=0 || area_width-width<=1)return;
+        if (width>=viewport.right-viewport.left-1 && height>=viewport.bottom-viewport.top-1)return;
     }
-    else if (_viv_is_fullscreen || IsZoomed(_viv_hwnd))
+
+    if (screen_filling)
     {
-        // The frame update already exposes the full screen area in these modes.
-        return;
+        int outer_width=min(work_width,original->right-original->left);
+        if (!standard && original->bottom-original->top>=work_height-tolerance)
+            outer_width=work_width;
+        area_width=outer_width-min(sidebar_limit,outer_width/2);
+        area_height=min(work_height,original->bottom-original->top)-chrome_height;
     }
-
-    chrome_width = exif_sidebar_width(_viv_hwnd);
-    chrome_height = title_height();
-    // A standard window that reaches the top and bottom can grow sideways
-    // as the picture uses the height reclaimed from the title row.
-    if (!standard && original->bottom-original->top>=work_height-2)
-        area_width = work_width-chrome_width;
-    area_width = min(area_width,work_width-chrome_width);
-    area_height = min(area_height,work_height-chrome_height);
+    else
+    {
+        area_width=min(photo_width,work_width-min(sidebar_limit,work_width/2));
+        area_height=min(photo_height,work_height-chrome_height);
+    }
     if (area_width<=0 || area_height<=0)return;
-    _viv_render_size_in_area(area_width,area_height,&width,&height);
-    width = min(width,area_width)+chrome_width;
-    height = min(height,area_height)+chrome_height;
-    x = original->left+(original->right-original->left-width)/2;
-    y = original->top+(original->bottom-original->top-height)/2;
-    x = max(work->left,min(x,work->right-width));
-    y = max(work->top,min(y,work->bottom-height));
 
-    if (x==original->left && y==original->top &&
-        x+width==original->right && y+height==original->bottom)return;
-    _viv_in_sizemove = 1;
+    _viv_render_size_in_area(area_width,area_height,config_fill_window,&width,&height);
+    width=min(width,area_width);
+    height=min(height,area_height);
+    if (width<=0 || height<=0)return;
+
+    // Position the new image around the old image's center, independent of chrome.
+    x=photo->left+(photo_width-width)/2;
+    y=photo->top+(photo_height-height)/2-chrome_height;
+    width+=min(sidebar_limit,width);
+    height+=chrome_height;
+    x=max(work->left,min(x,work->right-width));
+    y=max(work->top,min(y,work->bottom-height));
+    SetRect(&target,x,y,x+width,y+height);
+    if (!full_frame && EqualRect(original,&target))return;
+
+    _viv_in_sizemove=1;
     if (_viv_is_fullscreen)
     {
-        _viv_fullscreen_is_maxed = 0;
+        _viv_fullscreen_is_maxed=0;
         _viv_toggle_fullscreen();
     }
     if (IsZoomed(_viv_hwnd))ShowWindow(_viv_hwnd,SW_RESTORE);
 
-    _viv_fitting_window = 1;
-    SetWindowPos(_viv_hwnd,NULL,x,y,width,height,SWP_NOZORDER|SWP_NOACTIVATE);
-    _viv_fitting_window = 0;
-    _viv_in_sizemove = was_moving;
-    _viv_user_sized_window = 1;
-    _viv_remember_manual_size();
-    _viv_fit_last_valid = GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);
+    _viv_fitting_window=1;
+    SetWindowPos(_viv_hwnd,NULL,x,y,width,height,SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOCOPYBITS);
+    _viv_fitting_window=was_fitting;
+    _viv_in_sizemove=was_moving;
+    if (screen_filling)_viv_user_sized_window=1;
+    if (_viv_user_sized_window)_viv_remember_manual_size();
+    _viv_fit_last_valid=GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);
 }
 
 static void _viv_set_view_mode(BOOL standard)
 {
-    RECT original, work;
-    BOOL refit = _viv_frame_count && (!!config_show_caption!=standard) &&
+    RECT original,photo,work;
+    POINT origin={0,0};
+    BOOL screen_filling=FALSE;
+    BOOL refit=(!!config_show_caption!=standard) && !_viv_zoom_pos && !_viv_1to1 &&
+        _viv_doing!=_VIV_DOING_1TO1SCROLL && !IsIconic(_viv_hwnd) &&
+        _viv_dst_zoom_x_pos==_VIV_DST_ZOOM_ONE && _viv_dst_zoom_y_pos==_VIV_DST_ZOOM_ONE &&
         GetWindowRect(_viv_hwnd,&original) &&
         (_viv_is_fullscreen || IsZoomed(_viv_hwnd) || !_viv_window_arranged(_viv_hwnd)) &&
-        fyto_window_needs_drag_restore(_viv_hwnd);
-    if (refit)os_MonitorRectFromWindow(_viv_hwnd,0,&work);
+        fyto_visible_image_rect(&photo) && ClientToScreen(_viv_hwnd,&origin);
+    if (refit)
+    {
+        OffsetRect(&photo,origin.x,origin.y);
+        os_MonitorRectFromWindow(_viv_hwnd,0,&work);
+        screen_filling=fyto_window_needs_drag_restore(_viv_hwnd);
+    }
 
-    config_show_menu = standard;
-    config_show_caption = standard;
-    config_show_thickframe = standard;
-    config_show_status = 0;
-    config_show_controls = 0;
+    config_show_menu=standard;
+    config_show_caption=standard;
+    config_show_thickframe=standard;
+    config_show_status=0;
+    config_show_controls=0;
     _viv_update_frame();
 
-    if (refit)_viv_fit_mode_window(&original,&work,standard);
+    if (refit)_viv_fit_mode_window(&original,&photo,&work,screen_filling,standard);
 }
 
 static void _viv_start_first_frame(void)

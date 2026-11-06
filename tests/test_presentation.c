@@ -301,8 +301,19 @@ int wmain(int argc,wchar_t **argv){
     cases++;
     reset();
     fake_zoomed=1;fake_window=fake_monitor.rcWork;config_show_caption=1;
+    _viv_image_wide=2560;_viv_image_high=1392;
     _viv_set_view_mode(FALSE);
     assert(fake_zoomed && moves==0 && same_rect(&fake_window,&fake_monitor.rcWork));
+    cases++;
+    reset();
+    fake_zoomed=1;fake_window=fake_monitor.rcWork;config_show_caption=1;
+    _viv_set_view_mode(FALSE);
+    assert(!fake_zoomed && moves==1 && inside(&fake_window,&fake_monitor.rcWork));
+    {
+        int rw,rh;
+        _viv_get_render_size(&rw,&rh);
+        assert(rw==fake_window.right-fake_window.left && rh==fake_window.bottom-fake_window.top);
+    }
     cases++;
     reset();
     fake_arranged=1;SetRect(&fake_window,0,0,1280,1392);before=fake_window;
@@ -313,8 +324,50 @@ int wmain(int argc,wchar_t **argv){
     reset();
     before=fake_window;
     _viv_set_view_mode(TRUE);
+    assert(config_show_caption && fake_window.left==before.left &&
+           fake_window.top+title_height()==before.top && fake_window.bottom==before.bottom);
     _viv_set_view_mode(FALSE);
-    assert(moves==0 && same_rect(&fake_window,&before));
+    assert(moves==2 && same_rect(&fake_window,&before) && !_viv_user_sized_window);
+    cases++;
+    /* Removing the title row trims both kinds of letterbox around the old image. */
+    for (p=0; p<2; p++)
+    {
+        reset();
+        config_show_caption=1;
+        _viv_user_sized_window=1;
+        if (p==0)_viv_image_wide=2000;
+        else _viv_image_high=2000;
+        SetRect(&fake_window,100,100,1300,1000);
+        assert(fyto_visible_image_rect(&visible));
+        OffsetRect(&visible,fake_window.left,fake_window.top+title_height());
+        for (a=0; a<3; a++)
+        {
+            _viv_set_view_mode(FALSE);
+            assert(same_rect(&fake_window,&visible));
+            _viv_set_view_mode(TRUE);
+            assert(fake_window.left==visible.left && fake_window.right==visible.right &&
+                   fake_window.top+title_height()==visible.top && fake_window.bottom==visible.bottom);
+        }
+        cases++;
+    }
+    /* A narrow portrait image also refits the EXIF panel to the new width. */
+    reset();
+    config_show_caption=config_show_exif=1;
+    _viv_image_wide=1000;_viv_image_high=5000;
+    SetRect(&fake_window,100,100,1300,1000);
+    assert(fyto_visible_image_rect(&visible));
+    OffsetRect(&visible,fake_window.left,fake_window.top+title_height());
+    _viv_set_view_mode(FALSE);
+    assert(fake_window.left==visible.left && fake_window.top==visible.top && fake_window.bottom==visible.bottom);
+    _viv_viewport_rect(&canvas);
+    assert(canvas.right-canvas.left==visible.right-visible.left);
+    cases++;
+    /* Zoom and fixed tiling are still controlled by the viewer and Windows. */
+    reset();
+    _viv_zoom_pos=1;
+    before=fake_window;
+    _viv_set_view_mode(TRUE);
+    assert(config_show_caption && moves==0 && same_rect(&fake_window,&before));
     cases++;
 
     reset();_viv_fit_image_window();

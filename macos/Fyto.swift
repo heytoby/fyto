@@ -11,7 +11,8 @@ func imageFit(_ size: CGSize, in limit: CGSize, longEdge: CGFloat = .greatestFin
     guard size.width > 0, size.height > 0, limit.width > 0, limit.height > 0 else { return .zero }
     let scale = min(limit.width / size.width, limit.height / size.height,
                     longEdge / max(size.width, size.height))
-    return CGSize(width: max(1, floor(size.width * scale)), height: max(1, floor(size.height * scale)))
+    return CGSize(width: max(1, min(limit.width, longEdge, ceil(size.width * scale))),
+                  height: max(1, min(limit.height, longEdge, ceil(size.height * scale))))
 }
 
 func registerViewerFont() {
@@ -243,24 +244,52 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc func toggleMode() {
         let previous = window.frame
+        canvas.layoutSubtreeIfNeeded()
+        let oldPhoto = window.convertToScreen(canvas.convert(canvas.photoFrame, to: nil))
         standard.toggle()
         UserDefaults.standard.set(standard, forKey: "standardMode")
         canvas.refreshControls()
-        guard let photo, let screen, canvas.zoom == 1 else { return }
-        let work = screen.visibleFrame
-        let fillsHeight = abs(previous.height - work.height) <= 2
-        guard expanded || fillsHeight || abs(previous.width - work.width) <= 2 else { return }
-        let maximum = NSSize(width: expanded || fillsHeight ? work.width : min(work.width, previous.width),
-                             height: min(work.height, expanded ? work.height : previous.height))
+        guard let photo, let screen, canvas.zoom == 1, !oldPhoto.isEmpty else { return }
+        let target = modeFrame(previous: previous, picture: oldPhoto, pixels: photo.size(turned: turns),
+                               work: screen.visibleFrame, standard: standard)
+        if target != previous { window.setFrame(target, display: true) }
+    }
+
+    private func modeFrame(previous: NSRect, picture: NSRect, pixels: CGSize, work: NSRect,
+                           standard: Bool) -> NSRect {
         let chrome = standard ? titleHeight : 0
-        let sidebar = metadataWidth(in: maximum.width)
-        let fit = imageFit(photo.size(turned: turns),
-                           in: CGSize(width: maximum.width - sidebar, height: maximum.height - chrome))
-        guard fit.width > 0, fit.height > 0 else { return }
-        let size = CGSize(width: max(window.minSize.width, fit.width + sidebar),
-                          height: max(window.minSize.height, fit.height + chrome))
-        window.setFrame(clamp(NSRect(x: previous.midX - size.width / 2, y: previous.midY - size.height / 2,
-                                     width: size.width, height: size.height), to: work), display: true)
+        let fillsHeight = previous.height >= work.height - 2
+        let fillsScreen = expanded || fillsHeight || previous.width >= work.width - 2
+        let outerWidth = expanded || (!standard && fillsHeight) ? work.width : min(work.width, previous.width)
+        let panel = metadataWidth(in: outerWidth)
+        let available = fillsScreen
+            ? CGSize(width: outerWidth - panel, height: min(work.height, expanded ? work.height : previous.height) - chrome)
+            : CGSize(width: min(picture.width, work.width - panel), height: min(picture.height, work.height - chrome))
+        let fit = imageFit(pixels, in: available)
+        guard fit.width > 0, fit.height > 0 else { return previous }
+        let width = max(window.minSize.width, fit.width + (fit.width >= 100 ? panel : 0))
+        let height = max(window.minSize.height, fit.height + chrome)
+        // Window coordinates grow upward. The title occupies space above the image.
+        return clamp(NSRect(x: picture.midX - (width - metadataWidth(in: width)) / 2,
+                            y: picture.midY - (height - chrome) / 2,
+                            width: width, height: height), to: work)
+    }
+
+    func verifyModeFitting() {
+        precondition(!showsMetadata)
+        let work = NSRect(x: 0, y: 0, width: 1920, height: 1040)
+        let previous = NSRect(x: 100, y: 100, width: 1200, height: 800)
+        let picture = NSRect(x: 450, y: 108, width: 500, height: 750)
+        let minimal = modeFrame(previous: previous, picture: picture, pixels: picture.size, work: work, standard: false)
+        precondition(minimal == picture)
+        let standard = modeFrame(previous: minimal, picture: picture, pixels: picture.size, work: work, standard: true)
+        precondition(standard.origin == picture.origin && standard.size == CGSize(width: 500, height: 750 + titleHeight))
+
+        let fitted = modeFrame(previous: work, picture: work, pixels: work.size, work: work, standard: true)
+        precondition(fitted.height == work.height && fitted.width < work.width)
+        let fittedPicture = NSRect(x: fitted.minX, y: fitted.minY, width: fitted.width, height: fitted.height - titleHeight)
+        precondition(modeFrame(previous: fitted, picture: fittedPicture, pixels: work.size, work: work, standard: false) == work)
+        print("macOS mode switching preserves the image position and fits screen edges")
     }
 
     @objc func togglePlayback() {
@@ -557,6 +586,7 @@ enum FytoMain {
         precondition(viewer.pinned == previous)
         PhotoMetadata.verify()
         ViewerCanvas.verifyPinAlignment()
+        viewer.verifyModeFitting()
         try MacUpdater.verifyFeed()
         print("macOS accessory policy, embedded font, long-edge sizing and topmost state verified")
     }
