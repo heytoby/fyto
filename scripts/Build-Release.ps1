@@ -63,12 +63,19 @@ if($WixDll -and $UiExtension){
   & ./build-bootstrap.ps1 -Msi (Join-Path $build 'fyto.msi') -Output (Join-Path $build 'fyto-Setup.exe')
  }finally{Pop-Location}
 }
+$msi=Join-Path $out "fyto-Setup-$version.msi"
+Copy-Item (Join-Path $build 'fyto.msi') $msi
+$updater=Join-Path $root 'voidImageViewer/res/fyto-updater.exe'
+$test=Start-Process $updater -ArgumentList '--self-test' -PassThru -Wait -WindowStyle Hidden
+if($test.ExitCode -ne 0){throw 'Updater self-test failed'}
+$test=Start-Process $updater -ArgumentList "--verify-msi `"$msi`" $version" -PassThru -Wait -WindowStyle Hidden
+if($test.ExitCode -ne 0){throw 'MSI update verification failed'}
 $installer=Join-Path $out "fyto-Setup-$version.exe"
 Copy-Item (Join-Path $build 'fyto-Setup.exe') $installer
 $test=Start-Process $installer -ArgumentList '/verify' -PassThru -Wait -WindowStyle Hidden
 if($test.ExitCode -ne 0){throw 'Installer verification failed'}
 $zip=Join-Path $out "fyto-Setup-$version.zip"
-Compress-Archive -Path $installer,(Join-Path $payload 'LICENSE'),(Join-Path $payload 'libwebp-COPYING'),(Join-Path $payload 'libwebp-PATENTS'),(Join-Path $payload 'NOTICE.txt'),(Join-Path $payload 'README.txt') -DestinationPath $zip -Force
+Compress-Archive -Path $msi,(Join-Path $payload 'LICENSE'),(Join-Path $payload 'libwebp-COPYING'),(Join-Path $payload 'libwebp-PATENTS'),(Join-Path $payload 'NOTICE.txt'),(Join-Path $payload 'README.txt') -DestinationPath $zip -Force
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $source=Join-Path $out "fyto-source-$version.zip"
@@ -82,6 +89,6 @@ try{
   [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$file.FullName,$relative,[IO.Compression.CompressionLevel]::Optimal) | Out-Null
  }
 }finally{$archive.Dispose()}
-$lines=@($installer,$zip,$source) | ForEach-Object { "$((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_))" }
+$lines=@($msi,$installer,$zip,$source) | ForEach-Object { "$((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_))" }
 [IO.File]::WriteAllLines((Join-Path $out 'SHA256SUMS.txt'),$lines,(New-Object Text.UTF8Encoding($false)))
 Write-Output "Release assets: $out"

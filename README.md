@@ -12,7 +12,7 @@ Windows 10/11 x64 使用安装程序。macOS 12 及以上可下载 Universal DMG
 
 ### Windows
 
-下载 Release 中的 `fyto-Setup-版本号.exe` 并运行；也可以解压同名 ZIP 后运行其中的安装程序。支持 Windows 10/11 x64。升级会沿用原设置，安装前自动关闭当前 Windows 会话中正在运行的 fyto。首次安装可在软件中选择图片格式。
+下载 Release 中的 `fyto-Setup-版本号.msi` 并运行。也可以解压同名 ZIP 后运行其中的 MSI。支持 Windows 10/11 x64。升级沿用原安装目录和设置。首次打开 fyto 后，可在帮助菜单中设置图片格式关联。
 
 首次使用默认精简模式，之后沿用上次关闭时保存的显示模式。从文件管理器打开图片时使用 Windows 主显示器，默认以图片长边 1980 像素计算窗口尺寸，短边保持原图比例；屏幕可用区域不足时，横图和竖图使用同一个可容纳两种方向的长边上限。安装完成后的空窗口仍保持 16:10 横向比例。
 
@@ -39,7 +39,7 @@ macOS 可从标准模式的菜单或图片右键菜单进入 **帮助 → 检查
 
 ### Windows
 
-点击 **帮助 → 检查更新**。软件不会在启动时或后台检查，也不会主动弹出更新提示。发现更高版本时，自动下载安装包、校验 SHA-256、启动覆盖安装并重新打开 fyto。安装需要允许 Windows 管理员权限提示；取消权限提示会中止更新。更新检查需要 .NET Framework 4.8、网络连接和可访问的 GitHub 正式 Release。
+点击 **帮助 → 检查更新**。软件不会在启动时或后台检查，也不会主动弹出更新提示。发现更高版本时，下载 MSI 并校验 SHA-256，按 Windows 安装程序提示完成升级后重新打开 fyto。安装需要允许 Windows 管理员权限提示；取消权限提示会中止更新。更新检查需要 .NET Framework 4.8、网络连接和可访问的 GitHub 正式 Release。
 
 默认更新仓库为 [heytoby/fyto](https://github.com/heytoby/fyto)。也可在 fyto 设置目录创建 `updates.ini`：
 
@@ -52,7 +52,7 @@ repository=heytoby/fyto
 
 ## 构建与发布
 
-参见 [发布指南](PUBLISHING.zh-CN.md) 和 [构建说明](BUILD-fyto.md)。`scripts/Build-Release.ps1` 生成带版本号的安装 EXE、ZIP、源码包及 SHA256SUMS。更新 main 分支的版本号或推送版本标签后，GitHub 工作流构建并校验安装包，再发布正式 Release。
+参见 [发布指南](PUBLISHING.zh-CN.md) 和 [构建说明](BUILD-fyto.md)。`scripts/Build-Release.ps1` 生成 Windows MSI、旧版更新器兼容 EXE、ZIP、源码包和 SHA256SUMS。先在构建分支打包并检查 Windows 安装文件，再将已验证的同一批构建产物发布到 GitHub。
 
 macOS 构建使用 Xcode 命令行工具运行 macos/Build-App.sh。
 

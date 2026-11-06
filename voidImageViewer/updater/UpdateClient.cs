@@ -5,6 +5,9 @@ using System.Net.Http;
 using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -54,6 +57,66 @@ internal sealed class UpdateClient : Form {
         }
         throw new IOException("下载重定向次数过多。");
     }
+    static Dictionary<string,object> FindInstaller(IEnumerable<Dictionary<string,object>> assets, Version version) {
+        string prefix="fyto-Setup-"+version;
+        return assets.SingleOrDefault(a=>(string)a["name"]==prefix+".msi") ??
+               assets.SingleOrDefault(a=>(string)a["name"]==prefix+".exe");
+    }
+
+    [DllImport("msi.dll",CharSet=CharSet.Unicode)]
+    static extern uint MsiOpenDatabase(string path,IntPtr persist,out uint database);
+    [DllImport("msi.dll",CharSet=CharSet.Unicode)]
+    static extern uint MsiDatabaseOpenView(uint database,string query,out uint view);
+    [DllImport("msi.dll")] static extern uint MsiViewExecute(uint view,uint record);
+    [DllImport("msi.dll")] static extern uint MsiViewFetch(uint view,out uint record);
+    [DllImport("msi.dll",CharSet=CharSet.Unicode)]
+    static extern uint MsiRecordGetString(uint record,uint field,StringBuilder value,ref uint length);
+    [DllImport("msi.dll")] static extern uint MsiCloseHandle(uint handle);
+
+    static string ReadMsiProperty(uint database,string property) {
+        uint view=0,record=0,length=256;
+        var value=new StringBuilder((int)length);
+        string query="SELECT `Value` FROM `Property` WHERE `Property`='"+property+"'";
+        try {
+            if(MsiDatabaseOpenView(database,query,out view)!=0 || MsiViewExecute(view,0)!=0 ||
+               MsiViewFetch(view,out record)!=0 || MsiRecordGetString(record,1,value,ref length)!=0)
+                throw new InvalidDataException("无法读取 MSI 安装包属性。");
+            return value.ToString();
+        } finally {
+            if(record!=0)MsiCloseHandle(record);
+            if(view!=0)MsiCloseHandle(view);
+        }
+    }
+
+    static void VerifyInstaller(string path,Version version) {
+        if(!path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)) {
+            var metadata=FileVersionInfo.GetVersionInfo(path);
+            if(metadata.ProductName!="fyto Installer" || ParseVersion(metadata.FileVersion)!=version)
+                throw new InvalidDataException("安装包名称或版本校验失败。");
+            return;
+        }
+        uint database;
+        if(MsiOpenDatabase(path,IntPtr.Zero,out database)!=0)
+            throw new InvalidDataException("无法打开 MSI 安装包。");
+        try {
+            string expected=String.Format(CultureInfo.InvariantCulture,"{0}.{1}.{2}",version.Major,version.Minor,version.Revision);
+            Guid upgradeCode;
+            if(version.Build!=0 || ReadMsiProperty(database,"ProductName")!="fyto 中文版" ||
+               ReadMsiProperty(database,"ProductVersion")!=expected ||
+               !Guid.TryParse(ReadMsiProperty(database,"UpgradeCode"),out upgradeCode) ||
+               upgradeCode!=new Guid("A9C96FF0-C5C9-41CD-BF19-E0E825F7E76B"))
+                throw new InvalidDataException("MSI 安装包的产品或版本校验失败。");
+        } finally { MsiCloseHandle(database); }
+    }
+
+    static ProcessStartInfo InstallerCommand(string path) {
+        var info=path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)
+            ? new ProcessStartInfo(Path.Combine(Environment.SystemDirectory,"msiexec.exe"),"/i \""+path+"\" /norestart")
+            : new ProcessStartInfo(path,"/update");
+        info.UseShellExecute=true;
+        info.Verb="runas";
+        return info;
+    }
     public UpdateClient(string path,string repository) {
         exe=Path.GetFullPath(path);repo=repository;
         Text="fyto · 检查更新";ClientSize=new System.Drawing.Size(520,180);
@@ -77,18 +140,20 @@ internal sealed class UpdateClient : Form {
                 }
                 var release=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(json);
                 if((bool)release["draft"] || (bool)release["prerelease"])throw new InvalidDataException("当前发布不是正式版本。");
-                Version latest=ParseVersion((string)release["tag_name"]);
+                string tag=(string)release["tag_name"];
+                Version latest=ParseVersion(tag);
                 if(latest<=current){status.Text="当前已是最新版本："+current;return;}
-                string name="fyto-Setup-"+latest+".exe";
                 var assets=((System.Collections.IEnumerable)release["assets"]).Cast<Dictionary<string,object>>();
-                var asset=assets.SingleOrDefault(a=>(string)a["name"]==name);
-                if(asset==null || (string)asset["state"]!="uploaded")throw new InvalidDataException("新版缺少安装文件："+name);
+                var asset=FindInstaller(assets,latest);
+                if(asset==null || (string)asset["state"]!="uploaded")throw new InvalidDataException("新版缺少 Windows 安装包。");
+                string name=(string)asset["name"];
                 long expected=Convert.ToInt64(asset["size"]);
                 if(expected<=0 || expected>MaxInstaller)throw new InvalidDataException("安装包大小异常。");
                 object raw;string digest=asset.TryGetValue("digest",out raw)?raw as string:null;
                 if(!Regex.IsMatch(digest ?? "",@"^sha256:[a-fA-F0-9]{64}$"))throw new InvalidDataException("发布文件缺少 SHA-256 校验值，请联系发布者重新上传。");
                 string url=(string)asset["browser_download_url"];
-                if(!url.StartsWith("https://github.com/"+repo+"/releases/download/",StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("安装包不属于指定仓库。");
+                string expectedUrl="https://github.com/"+repo+"/releases/download/"+tag+"/"+name;
+                if(!String.Equals(url,expectedUrl,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("安装包地址与发布版本不一致。");
                 download=Path.Combine(Path.GetDirectoryName(Application.ExecutablePath),name);
                 status.Text="发现新版 "+latest+"，正在下载并校验…";
                 using(var response=await Get(client,url)) using(var input=await response.Content.ReadAsStreamAsync()) using(var output=new FileStream(download,FileMode.CreateNew,FileAccess.Write,FileShare.None)) {
@@ -101,18 +166,17 @@ internal sealed class UpdateClient : Form {
                     if(total!=expected)throw new InvalidDataException("安装包下载不完整。");
                 }
                 if(!String.Equals(Hash(download),digest.Substring(7),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("安装包校验失败，已取消更新。");
-                var metadata=FileVersionInfo.GetVersionInfo(download);
-                if(metadata.ProductName!="fyto Installer" || ParseVersion(metadata.FileVersion)!=latest)throw new InvalidDataException("安装包名称或版本校验失败。");
-                status.Text="正在安装新版，请在 Windows 提示中允许安装。";
+                VerifyInstaller(download,latest);
+                status.Text="请按 Windows 安装程序的提示完成更新。";
                 installing=true;close.Enabled=false;
                 int result;
-                using(var process=Process.Start(new ProcessStartInfo(download,"/update"){UseShellExecute=true,Verb="runas"})) {
+                using(var process=Process.Start(InstallerCommand(download))) {
                     await Task.Run(()=>process.WaitForExit());result=process.ExitCode;
                 }
                 installing=false;close.Enabled=true;
                 if(result!=0 && result!=3010)throw new IOException("更新安装未完成（代码 "+result+"）。");
                 string restart=exe;
-                if(ParseVersion(FileVersionInfo.GetVersionInfo(restart).FileVersion)<latest) {
+                if(!File.Exists(restart) || ParseVersion(FileVersionInfo.GetVersionInfo(restart).FileVersion)<latest) {
                     using(var key=RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,RegistryView.Registry64).OpenSubKey(@"Software\fyto")) {
                         restart=key==null?"":Path.Combine((string)key.GetValue("InstallLocation",""),"fyto.exe");
                     }
@@ -130,10 +194,20 @@ internal sealed class UpdateClient : Form {
             foreach(string bad in new[]{"1.0","v1.0.0.28-beta","../1.0.0.28"}){try{ParseVersion(bad);return 2;}catch(InvalidDataException){}}
             foreach(string bad in new[]{"http://github.com/x","https://github.com.evil.test/x","https://user@github.com/x","https://github.com:444/x"}){try{Trusted(bad);return 3;}catch(InvalidDataException){}}
             Trusted("https://release-assets.githubusercontent.com/a");
-            var sample=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>("{\"assets\":[{\"name\":\"fyto-Setup-1.0.0.28.exe\"}],\"draft\":false}");
-            var asset=((System.Collections.IEnumerable)sample["assets"]).Cast<Dictionary<string,object>>().Single();
-            if((string)asset["name"]!="fyto-Setup-1.0.0.28.exe" || (bool)sample["draft"])return 5;
+            var exeAsset=new Dictionary<string,object>{{"name","fyto-Setup-1.0.0.39.exe"}};
+            var msiAsset=new Dictionary<string,object>{{"name","fyto-Setup-1.0.0.39.msi"}};
+            var version=new Version(1,0,0,39);
+            if(FindInstaller(new[]{exeAsset},version)!=exeAsset ||
+               FindInstaller(new[]{exeAsset,msiAsset},version)!=msiAsset ||
+               FindInstaller(new[]{exeAsset,msiAsset},new Version(1,0,0,40))!=null)return 5;
+            var command=InstallerCommand(@"C:\Test Directory\fyto-Setup-1.0.0.39.msi");
+            if(Path.GetFileName(command.FileName)!="msiexec.exe" ||
+               command.Arguments!="/i \"C:\\Test Directory\\fyto-Setup-1.0.0.39.msi\" /norestart")return 6;
             return 0;
+        }
+        if(args.Length==3 && args[0]=="--verify-msi") {
+            try { VerifyInstaller(args[1],ParseVersion(args[2]));return 0; }
+            catch { return 7; }
         }
         if(args.Length!=2)return 4;
         bool created;using(var mutex=new System.Threading.Mutex(true,@"Local\fyto-manual-updater",out created)) {

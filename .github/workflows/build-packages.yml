@@ -20,6 +20,33 @@ jobs:
       - name: Build and verify the Windows installer
         shell: pwsh
         run: ./scripts/Build-Release.ps1
+      - name: Verify MSI uses the registered install directory and preserves settings
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $packages=@(Get-ChildItem -LiteralPath release-assets -Filter 'fyto-Setup-*.msi' -File)
+          if($packages.Count -ne 1){throw 'Expected one Windows MSI'}
+          $package=$packages[0]
+          $version=$package.BaseName.Substring('fyto-Setup-'.Length)
+          $target=Join-Path $env:RUNNER_TEMP 'fyto existing installation'
+          New-Item -ItemType Directory -Path $target | Out-Null
+          $ini=Join-Path $target 'fyto.ini'
+          [IO.File]::WriteAllText($ini,"[fyto]`r`nfontsize=29`r`n")
+          $before=(Get-FileHash -LiteralPath $ini).Hash
+          $key='HKLM:\SOFTWARE\fyto'
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -LiteralPath $key -Name InstallLocation -Value ($target+'\') -PropertyType String | Out-Null
+          $log=Join-Path $env:RUNNER_TEMP 'fyto-install.log'
+          $msiexec=Join-Path $env:WINDIR 'System32\msiexec.exe'
+          $install=Start-Process $msiexec -ArgumentList "/i `"$($package.FullName)`" /quiet /norestart /l*v `"$log`"" -WindowStyle Hidden -Wait -PassThru
+          if($install.ExitCode -ne 0){
+            if(Test-Path -LiteralPath $log){Get-Content -LiteralPath $log -Tail 35}
+            throw "Native MSI install failed ($($install.ExitCode))"
+          }
+          $installed=Get-Item -LiteralPath (Join-Path $target 'fyto.exe')
+          if($installed.VersionInfo.FileVersion -ne $version){throw 'Installed viewer version differs'}
+          if((Get-FileHash -LiteralPath $ini).Hash -ne $before){throw 'Existing settings were overwritten'}
+          Write-Output 'Native MSI installed in the registered directory and preserved the existing ini.'
       - name: Upload the Windows x64 installer
         uses: actions/upload-artifact@v4
         with:
