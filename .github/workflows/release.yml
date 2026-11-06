@@ -114,11 +114,18 @@ jobs:
           exe="fyto-Setup-$FYTO_VERSION.exe"
           mac="fyto-$FYTO_VERSION-macos-universal.zip"
           dmg="fyto-$FYTO_VERSION-macos-universal.dmg"
+          manifest="fyto-update.json"
           (
             cd release-assets
             printf '%s  %s\n%s  %s\n' "$FYTO_MSI_HASH" "$msi" "$FYTO_EXE_HASH" "$exe" | sha256sum -c -
             sed -i 's/\r$//' SHA256SUMS.txt
-            sha256sum "$mac" "$dmg" >> SHA256SUMS.txt
+            for name in "$msi" "$exe" "$mac"; do
+              hash=$(sha256sum "$name")
+              jq -n --arg name "$name" --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$FYTO_TAG/$name" \
+                --arg digest "sha256:${hash%% *}" --argjson size "$(wc -c < "$name")" \
+                '{name:$name, state:"uploaded", size:$size, digest:$digest, browser_download_url:$url}'
+            done | jq -s --arg tag "$FYTO_TAG" '{tag_name:$tag, draft:false, prerelease:false, assets:.}' > "$manifest"
+            sha256sum "$mac" "$dmg" "$manifest" >> SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
           assets=(
@@ -128,7 +135,22 @@ jobs:
             "release-assets/fyto-source-$FYTO_VERSION.zip"
             "release-assets/$mac"
             "release-assets/$dmg"
+            "release-assets/$manifest"
             "release-assets/SHA256SUMS.txt"
           )
           gh release create "$FYTO_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" --latest --title "fyto $FYTO_TAG" --notes-file RELEASE_NOTES.md
+
+          public_feed="$RUNNER_TEMP/fyto-public-update.json"
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+              --connect-timeout 10 --max-time 25 --output "$public_feed" \
+              "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$manifest" &&
+              cmp -s "release-assets/$manifest" "$public_feed"; then
+              echo "Anonymous latest-release update manifest verified."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Public latest-release update manifest did not match the published file." >&2
+          exit 1

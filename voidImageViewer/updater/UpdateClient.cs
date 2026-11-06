@@ -41,7 +41,16 @@ internal sealed class UpdateClient : Form {
         client.DefaultRequestHeaders.UserAgent.ParseAdd("fyto-updater/1.0");
         return client;
     }
-    static async Task<HttpResponseMessage> Get(HttpClient client,string url) {
+    static bool IsRateLimited(HttpResponseMessage response) {
+        int code=(int)response.StatusCode;
+        IEnumerable<string> remaining;
+        return code==429 || (code==403 &&
+            (response.Headers.RetryAfter!=null ||
+             (response.Headers.TryGetValues("X-RateLimit-Remaining",out remaining) && remaining.Contains("0")) ||
+             (response.ReasonPhrase ?? "").IndexOf("rate limit",StringComparison.OrdinalIgnoreCase)>=0));
+    }
+
+    static async Task<HttpResponseMessage> Get(HttpClient client,string url,bool allowMissing=false) {
         Uri current=Trusted(url);
         for(int i=0;i<6;i++) {
             var response=await client.GetAsync(current,HttpCompletionOption.ResponseHeadersRead);
@@ -50,12 +59,33 @@ internal sealed class UpdateClient : Form {
                 var next=response.Headers.Location;
                 response.Dispose();
                 if(next==null) throw new IOException("更新服务器返回了无效重定向。");
-                current=Trusted(new Uri(current,next).AbsoluteUri); continue;
+                current=Trusted(new Uri(current,next).AbsoluteUri);
+                continue;
             }
-            if(code==404) { response.Dispose(); throw new IOException("无法访问更新发布。请确认仓库已公开且已发布正式版本。"); }
-            response.EnsureSuccessStatusCode();return response;
+            if(response.IsSuccessStatusCode || (allowMissing && code==404))return response;
+            bool limited=IsRateLimited(response);
+            response.Dispose();
+            if(limited)throw new IOException("GitHub 暂时限制了更新请求，请稍后再试。");
+            if(code==404)throw new IOException("无法访问更新发布。请确认仓库已公开且已发布正式版本。");
+            throw new IOException("无法从 GitHub 获取更新（HTTP "+code+"）。");
         }
         throw new IOException("下载重定向次数过多。");
+    }
+
+    static async Task<string> ReadRelease(HttpResponseMessage response) {
+        if(response.Content.Headers.ContentLength>2*1024*1024)throw new InvalidDataException("版本信息过大。");
+        string json=await response.Content.ReadAsStringAsync();
+        if(json.Length>2*1024*1024)throw new InvalidDataException("版本信息过大。");
+        return json;
+    }
+
+    static async Task<string> GetRelease(HttpClient client,string repository) {
+        string manifest="https://github.com/"+repository+"/releases/latest/download/fyto-update.json";
+        using(var response=await Get(client,manifest,true)) {
+            if(response.StatusCode!=HttpStatusCode.NotFound)return await ReadRelease(response);
+        }
+        using(var response=await Get(client,"https://api.github.com/repos/"+repository+"/releases/latest"))
+            return await ReadRelease(response);
     }
     static Dictionary<string,object> FindInstaller(IEnumerable<Dictionary<string,object>> assets, Version version) {
         string prefix="fyto-Setup-"+version;
@@ -132,12 +162,7 @@ internal sealed class UpdateClient : Form {
             status.Text="正在检查 GitHub 正式版本…";
             Version current=ParseVersion(FileVersionInfo.GetVersionInfo(exe).FileVersion);
             using(var client=Client()) {
-                string json;
-                using(var response=await Get(client,"https://api.github.com/repos/"+repo+"/releases/latest")) {
-                    if(response.Content.Headers.ContentLength>2*1024*1024)throw new InvalidDataException("版本信息过大。");
-                    json=await response.Content.ReadAsStringAsync();
-                    if(json.Length>2*1024*1024)throw new InvalidDataException("版本信息过大。");
-                }
+                string json=await GetRelease(client,repo);
                 var release=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(json);
                 if((bool)release["draft"] || (bool)release["prerelease"])throw new InvalidDataException("当前发布不是正式版本。");
                 string tag=(string)release["tag_name"];
@@ -188,6 +213,57 @@ internal sealed class UpdateClient : Form {
         } catch(Exception e) {installing=false;close.Enabled=true;status.Text="更新未完成："+e.Message;}
         finally {progress.Style=ProgressBarStyle.Continuous;progress.Value=0;if(download!=null)try{File.Delete(download);}catch(IOException){} }
     }
+    sealed class FeedTestHandler : HttpMessageHandler {
+        readonly Func<Uri,HttpResponseMessage> send;
+        public FeedTestHandler(Func<Uri,HttpResponseMessage> send) { this.send=send; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,System.Threading.CancellationToken cancellationToken) {
+            return Task.FromResult(send(request.RequestUri));
+        }
+    }
+
+    static int VerifyFeedTransport() {
+        const string repo="heytoby/fyto";
+        const string latest="https://github.com/"+repo+"/releases/latest/download/fyto-update.json";
+        const string versioned="https://github.com/"+repo+"/releases/download/v1.0.0.40/fyto-update.json";
+        const string blob="https://release-assets.githubusercontent.com/verified-feed";
+        const string api="https://api.github.com/repos/"+repo+"/releases/latest";
+        bool hasManifest=true,limitApi=true;
+        int apiCalls=0;
+        using(var client=new HttpClient(new FeedTestHandler(uri=>{
+            switch(uri.AbsoluteUri) {
+                case latest:
+                    if(!hasManifest)return new HttpResponseMessage(HttpStatusCode.NotFound);
+                    var redirect=new HttpResponseMessage(HttpStatusCode.Redirect);
+                    redirect.Headers.Location=new Uri(versioned);
+                    return redirect;
+                case versioned:
+                    var download=new HttpResponseMessage(HttpStatusCode.Redirect);
+                    download.Headers.Location=new Uri(blob);
+                    return download;
+                case blob:
+                    return new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent("manifest")};
+                case api:
+                    apiCalls++;
+                    if(!limitApi)return new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent("legacy API")};
+                    var limited=new HttpResponseMessage(HttpStatusCode.Forbidden);
+                    limited.Headers.TryAddWithoutValidation("X-RateLimit-Remaining","0");
+                    return limited;
+                default:
+                    throw new InvalidOperationException("Unexpected feed URL");
+            }
+        }))) {
+            if(GetRelease(client,repo).GetAwaiter().GetResult()!="manifest" || apiCalls!=0)return 8;
+            hasManifest=false;
+            limitApi=false;
+            if(GetRelease(client,repo).GetAwaiter().GetResult()!="legacy API" || apiCalls!=1)return 9;
+            limitApi=true;
+            try { GetRelease(client,repo).GetAwaiter().GetResult();return 10; }
+            catch(IOException e) {
+                if(!e.Message.Contains("限制了更新请求") || apiCalls!=2)return 11;
+            }
+        }
+        return 0;
+    }
     [STAThread] static int Main(string[] args) {
         if(args.Length==1 && args[0]=="--self-test") {
             if(ParseVersion("v1.0.0.28")<=ParseVersion("1.0.0.27"))return 1;
@@ -203,7 +279,7 @@ internal sealed class UpdateClient : Form {
             var command=InstallerCommand(@"C:\Test Directory\fyto-Setup-1.0.0.39.msi");
             if(Path.GetFileName(command.FileName)!="msiexec.exe" ||
                command.Arguments!="/i \"C:\\Test Directory\\fyto-Setup-1.0.0.39.msi\" /norestart")return 6;
-            return 0;
+            return VerifyFeedTransport();
         }
         if(args.Length==3 && args[0]=="--verify-msi") {
             try { VerifyInstaller(args[1],ParseVersion(args[2]));return 0; }

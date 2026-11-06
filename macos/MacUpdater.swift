@@ -4,6 +4,7 @@ import Darwin
 
 private let repository = "heytoby/fyto"
 private let bundleID = "io.github.heytoby.fyto"
+private let manifestURL = URL(string: "https://github.com/\(repository)/releases/latest/download/fyto-update.json")!
 private let latestURL = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
 private let maxInstallerBytes: Int64 = 128 * 1024 * 1024
 
@@ -94,7 +95,7 @@ private final class UpdateTransport: NSObject, URLSessionDownloadDelegate, @unch
               let host = url.host?.lowercased() else { return false }
         switch host {
         case "api.github.com": return url.path == latestURL.path
-        case "github.com": return url.path.hasPrefix("/\(repository)/releases/download/")
+        case "github.com": return url.path == manifestURL.path || url.path.hasPrefix("/\(repository)/releases/download/")
         case "release-assets.githubusercontent.com", "objects.githubusercontent.com": return true
         default: return false
         }
@@ -128,9 +129,13 @@ enum MacUpdater {
         let installed = try version(of: Bundle.main.bundleURL)
         let session = UpdateTransport(limit: 2 * 1024 * 1024).makeSession()
         defer { session.finishTasksAndInvalidate() }
-        var request = URLRequest(url: latestURL)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let (bytes, response) = try await session.bytes(for: request)
+        var (bytes, response) = try await session.bytes(for: URLRequest(url: manifestURL))
+        if let missing = response as? HTTPURLResponse, missing.statusCode == 404,
+           let url = missing.url, UpdateTransport.allows(url) {
+            var request = URLRequest(url: latestURL)
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            (bytes, response) = try await session.bytes(for: request)
+        }
         try validateResponse(response)
         var data = Data()
         for try await byte in bytes {
@@ -206,6 +211,11 @@ enum MacUpdater {
     private static func validateResponse(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse, let url = http.url, UpdateTransport.allows(url) else {
             throw UpdateFailure("更新服务器返回了不受信任的地址。")
+        }
+        if http.statusCode == 429 ||
+           (http.statusCode == 403 && (http.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0" ||
+                                      http.value(forHTTPHeaderField: "Retry-After") != nil)) {
+            throw UpdateFailure("GitHub 暂时限制了更新请求，请稍后再试。")
         }
         guard http.statusCode == 200 else {
             throw UpdateFailure("无法从 GitHub 获取更新，HTTP \(http.statusCode)。")
@@ -288,6 +298,8 @@ enum MacUpdater {
         let old = try Release(tag_name: "v1.0.0.33", draft: false, prerelease: false, assets: []).check(installed: installed)
         precondition(old.asset == nil && old.latest < installed)
         precondition(!UpdateTransport.allows(URL(string: "https://github.com.evil.test/heytoby/fyto/releases/download/a")!))
+        precondition(UpdateTransport.allows(manifestURL))
+        precondition(!UpdateTransport.allows(URL(string: "https://github.com/another/project/releases/latest/download/fyto-update.json")!))
         precondition(!UpdateTransport.allows(URL(string: "https://github.com/another/project/releases/download/a")!))
         print("macOS updater release parsing, version, hash and trusted hosts verified")
     }

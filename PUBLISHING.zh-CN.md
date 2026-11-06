@@ -12,7 +12,7 @@ Windows 构建需要 Visual Studio 2022 C++ Build Tools、Windows SDK、.NET SDK
 2. 下载成功运行的 Windows artifact ZIP。在启用 Defender 的 Windows 机器上执行 `python scripts/Verify-WindowsRelease.py <artifact.zip> <version>`。扫描 MSI 和旧版更新所用 EXE，记录脚本输出的两个 SHA-256。可传入 `--control` 对此前触发告警的正式包复现检测。
 3. 在已打包的提交之后创建一个空提交，提交消息尾部写入 `Fyto-Build-Run`、`Fyto-MSI-SHA256` 和 `Fyto-EXE-SHA256` 三个 trailer。将该提交快进到 main。发布工作流复用上述运行的产物，逐个校验，再发布 GitHub Release。版本必须递增。
 
-Windows 从 MSI 安装。1.0.0.39 及以上版本的更新器优先使用 MSI。兼容 EXE 供仍依赖 EXE 的旧版更新器使用。更新需要公开正式 Release，GitHub 附件提供 SHA-256 digest。
+Windows 从 MSI 安装。1.0.0.39 及以上版本的更新器优先使用 MSI。兼容 EXE 供仍依赖 EXE 的旧版更新器使用。发布工作流根据已校验的 Windows MSI、兼容 EXE 和 macOS ZIP 生成 `fyto-update.json`，上传后验证匿名下载地址返回同一份清单。
 
 ## 来源与许可
 

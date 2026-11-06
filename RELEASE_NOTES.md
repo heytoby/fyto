@@ -1,5 +1,5 @@
-# fyto 1.0.0.39
+# fyto 1.0.0.40
 
-Windows 手动安装使用标准 MSI，应用内更新优先下载 MSI 并核验包名、版本和 SHA‑256。发布前扫描本次构建的安装文件，核对校验值后发布同一批产物。旧版 fyto 可继续从「帮助 → 检查更新」升级。
+Windows 和 macOS 的更新检查优先读取正式 Release 的公开更新清单，避免匿名 GitHub API 额度用尽导致 403。安装包仍需通过版本和 SHA-256 校验。遇到旧版的 403 时，下载本版安装包覆盖升级一次。
 
-macOS 提供 Universal DMG 和用于应用内更新的 ZIP。
+Windows 提供标准 MSI，macOS 提供通用 DMG。
