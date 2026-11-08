@@ -490,7 +490,7 @@ static void _viv_timer_stop(void);
 static int _viv_is_window_maximized(HWND hwnd);
 static INT_PTR CALLBACK _viv_custom_rate_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static INT_PTR CALLBACK _viv_about_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
-static void _viv_update_frame(void);
+static void _viv_update_frame(const RECT *target);
 static void _viv_update_ontop(void);
 static void _viv_update_prevent_sleep(void);
 static void _viv_dst_pos_set(int x,int y);
@@ -1577,6 +1577,7 @@ debug_printf("LOAD %S is_preload %d\n",_viv_load_image_filename,is_preload);
 
 static void _viv_on_size(void)
 {
+    if (_viv_changing_frame)return;
     fyto_window_finish(_viv_hwnd,_viv_is_fullscreen || IsZoomed(_viv_hwnd));
 	if (!_viv_prevent_on_size)
 	{
@@ -1952,27 +1953,27 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 			
 		case VIV_ID_VIEW_CAPTION:
 			config_show_caption = !config_show_caption;
-			_viv_update_frame();
+			_viv_update_frame(NULL);
 			break;
 			
 		case VIV_ID_VIEW_THICKFRAME:
 			config_show_thickframe = !config_show_thickframe;
-			_viv_update_frame();
+			_viv_update_frame(NULL);
 			break;
 			
 		case VIV_ID_VIEW_MENU:
 			config_show_menu = !config_show_menu;
-			_viv_update_frame();
+			_viv_update_frame(NULL);
 			break;
 			
 		case VIV_ID_VIEW_STATUS:
 			config_show_status = 0;
-			_viv_update_frame();
+			_viv_update_frame(NULL);
 			break;
 			
 		case VIV_ID_VIEW_CONTROLS:
 			config_show_controls = 0;
-			_viv_update_frame();
+			_viv_update_frame(NULL);
 			break;
 			
 		case VIV_ID_VIEW_PRESET_1:
@@ -2703,6 +2704,17 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
             }
             // Only the merged title row occupies non-client space.
             client->top+=title_height();
+            if (wParam && _viv_changing_frame)
+            {
+                NCCALCSIZE_PARAMS *params=(NCCALCSIZE_PARAMS *)lParam;
+                RECT preserved;
+                // Keep the overlapping pixels at their old screen coordinates.
+                if (IntersectRect(&preserved,client,&params->rgrc[2]))
+                {
+                    params->rgrc[1]=params->rgrc[2]=preserved;
+                    return WVR_VALIDRECTS;
+                }
+            }
             return 0;
         }
         // The title row paints the menu labels. Never let the native menu bar
@@ -2718,8 +2730,14 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
             title_paint(hwnd); return 0;
         case WM_EXITMENULOOP:
             RedrawWindow(hwnd,NULL,NULL,RDW_FRAME|RDW_INVALIDATE|RDW_ALLCHILDREN); return 0;
-        case WM_NCPAINT:if(!_viv_is_fullscreen || config_show_caption){title_paint(hwnd);return 0;}break;
-        case WM_NCACTIVATE:if(!_viv_is_fullscreen || config_show_caption){title_paint(hwnd);return TRUE;}break;
+        case WM_NCPAINT:
+            if (_viv_changing_frame)return 0;
+            if (!_viv_is_fullscreen || config_show_caption){title_paint(hwnd);return 0;}
+            break;
+        case WM_NCACTIVATE:
+            if (_viv_changing_frame)return TRUE;
+            if (!_viv_is_fullscreen || config_show_caption){title_paint(hwnd);return TRUE;}
+            break;
         case 0x00ae:case 0x00af:if(!_viv_is_fullscreen)return 0;break;
 
         case WM_SETTEXT:{LRESULT result=DefWindowProc(hwnd,msg,wParam,lParam);if(!_viv_is_fullscreen || config_show_caption)title_paint(hwnd);return result;}
@@ -4220,6 +4238,8 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 			int high;
 			PAINTSTRUCT ps;
 
+            if (_viv_changing_frame)return 0;
+
 			// paint the image.
 			//
 			// we get a list of RECTs that describe the update region.
@@ -5505,7 +5525,7 @@ static int _viv_init(int nCmdShow)
     SendMessageW(_viv_hwnd,WM_SETICON,ICON_SMALL,(LPARAM)LoadImageW(os_hinstance,MAKEINTRESOURCEW(IDI_ICON1),IMAGE_ICON,16,16,LR_SHARED));
 	if ((!config_show_caption) || (!config_show_thickframe))
 	{
-		_viv_update_frame();
+		_viv_update_frame(NULL);
 	}
 		
 	os_make_rect_completely_visible(_viv_hwnd,&rect);
@@ -6752,7 +6772,8 @@ debug_printf("toggle fullscreen %d\n",!_viv_is_fullscreen);
 		
 		SetWindowLong(_viv_hwnd,GWL_STYLE,style);
 
-		SetWindowPos(_viv_hwnd,HWND_TOP,_viv_fullscreen_rect.left,_viv_fullscreen_rect.top,_viv_fullscreen_rect.right - _viv_fullscreen_rect.left,_viv_fullscreen_rect.bottom - _viv_fullscreen_rect.top,SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOCOPYBITS);
+		SetWindowPos(_viv_hwnd,HWND_TOP,_viv_fullscreen_rect.left,_viv_fullscreen_rect.top,_viv_fullscreen_rect.right - _viv_fullscreen_rect.left,_viv_fullscreen_rect.bottom - _viv_fullscreen_rect.top,
+            SWP_FRAMECHANGED|SWP_NOACTIVATE|(_viv_changing_frame?SWP_DEFERERASE:SWP_NOCOPYBITS));
 	
 		if (_viv_fullscreen_is_maxed)
 		{	
@@ -9787,21 +9808,52 @@ static INT_PTR CALLBACK _viv_custom_rate_proc(HWND hwnd,UINT msg,WPARAM wParam,L
 
 #include "fyto_about.h"
 
-static void _viv_update_frame(void)
+static void _viv_update_frame(const RECT *target)
 {
+    const UINT flags=SWP_FRAMECHANGED|SWP_NOZORDER|SWP_NOACTIVATE|SWP_DEFERERASE;
+
     _viv_changing_frame=1;
-    // Visible chrome changes must preserve outer geometry and native placement.
-    if(!_viv_is_fullscreen) {
-        DWORD style=GetWindowLong(_viv_hwnd,GWL_STYLE);
-        SetWindowLong(_viv_hwnd,GWL_STYLE,style|WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX);
+    if (target && _viv_is_fullscreen)
+    {
+        // Leave fullscreen directly at the fitted rectangle.
+        _viv_fullscreen_is_maxed=0;
+        _viv_fullscreen_rect=*target;
+        _viv_toggle_fullscreen();
     }
-    SetMenu(_viv_hwnd,NULL);
-    _viv_status_show(config_show_status);
-    _viv_controls_show(config_show_controls);
-    SetWindowPos(_viv_hwnd,NULL,0,0,0,0,SWP_FRAMECHANGED|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOCOPYBITS);
-    _viv_on_size();
-    RedrawWindow(_viv_hwnd,NULL,NULL,RDW_FRAME|RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);
+    else
+    {
+        BOOL restored=FALSE;
+        if (!_viv_is_fullscreen)
+        {
+            DWORD style=GetWindowLong(_viv_hwnd,GWL_STYLE);
+            DWORD chrome=WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX;
+            if ((style & chrome)!=chrome)SetWindowLong(_viv_hwnd,GWL_STYLE,style|chrome);
+        }
+        if (GetMenu(_viv_hwnd))SetMenu(_viv_hwnd,NULL);
+        _viv_status_show(config_show_status);
+        _viv_controls_show(config_show_controls);
+
+        if (target && IsZoomed(_viv_hwnd))
+        {
+            WINDOWPLACEMENT placement={sizeof(placement)};
+            // The viewer is a tool window, so its normal placement uses screen coordinates.
+            if (GetWindowPlacement(_viv_hwnd,&placement))
+            {
+                placement.flags=0;
+                placement.showCmd=SW_SHOWNORMAL;
+                placement.rcNormalPosition=*target;
+                restored=SetWindowPlacement(_viv_hwnd,&placement);
+            }
+            if (!restored)ShowWindow(_viv_hwnd,SW_RESTORE);
+        }
+        if (target && !restored)
+            SetWindowPos(_viv_hwnd,NULL,target->left,target->top,target->right-target->left,target->bottom-target->top,flags);
+        else if (!target)
+            SetWindowPos(_viv_hwnd,NULL,0,0,0,0,flags|SWP_NOMOVE|SWP_NOSIZE);
+    }
     _viv_changing_frame=0;
+    _viv_on_size();
+    RedrawWindow(_viv_hwnd,NULL,NULL,RDW_FRAME|RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW);
 }
 
 static void _viv_update_ontop(void)
@@ -14124,7 +14176,8 @@ static void _viv_fit_image_window(void)
     InvalidateRect(_viv_hwnd,NULL,FALSE);
 }
 
-static void _viv_fit_mode_window(const RECT *original,const RECT *photo,const RECT *work,BOOL screen_filling,BOOL standard)
+static BOOL _viv_mode_window_rect(const RECT *original,const RECT *photo,const RECT *work,
+    BOOL screen_filling,BOOL standard,RECT *target)
 {
     int width,height,area_width,area_height,x,y;
     int work_width=work->right-work->left,work_height=work->bottom-work->top;
@@ -14133,15 +14186,18 @@ static void _viv_fit_mode_window(const RECT *original,const RECT *photo,const RE
     int photo_width=photo->right-photo->left,photo_height=photo->bottom-photo->top;
     int tolerance=max(2,MulDiv(2,os_logical_high,96));
     BOOL full_frame=_viv_is_fullscreen || IsZoomed(_viv_hwnd);
-    BYTE was_moving=_viv_in_sizemove,was_fitting=_viv_fitting_window;
-    RECT target;
 
     if (full_frame)
     {
-        RECT viewport;
-        _viv_viewport_rect(&viewport);
-        _viv_get_render_size(&width,&height);
-        if (width>=viewport.right-viewport.left-1 && height>=viewport.bottom-viewport.top-1)return;
+        RECT viewport=*original;
+        if (!_viv_is_fullscreen)IntersectRect(&viewport,original,work);
+        area_width=viewport.right-viewport.left;
+        area_width-=min(sidebar_limit,area_width/2);
+        area_height=viewport.bottom-viewport.top-chrome_height;
+        if (area_width<=0 || area_height<=0)return FALSE;
+        _viv_render_size_in_area(area_width,area_height,
+            _viv_is_fullscreen?config_fullscreen_fill_window:config_fill_window,&width,&height);
+        if (width>=area_width-1 && height>=area_height-1)return FALSE;
     }
 
     if (screen_filling)
@@ -14157,12 +14213,12 @@ static void _viv_fit_mode_window(const RECT *original,const RECT *photo,const RE
         area_width=min(photo_width,work_width-min(sidebar_limit,work_width/2));
         area_height=min(photo_height,work_height-chrome_height);
     }
-    if (area_width<=0 || area_height<=0)return;
+    if (area_width<=0 || area_height<=0)return FALSE;
 
     _viv_render_size_in_area(area_width,area_height,config_fill_window,&width,&height);
     width=min(width,area_width);
     height=min(height,area_height);
-    if (width<=0 || height<=0)return;
+    if (width<=0 || height<=0)return FALSE;
 
     // Position the new image around the old image's center, independent of chrome.
     x=photo->left+(photo_width-width)/2;
@@ -14171,30 +14227,15 @@ static void _viv_fit_mode_window(const RECT *original,const RECT *photo,const RE
     height+=chrome_height;
     x=max(work->left,min(x,work->right-width));
     y=max(work->top,min(y,work->bottom-height));
-    SetRect(&target,x,y,x+width,y+height);
-    if (!full_frame && EqualRect(original,&target))return;
-
-    _viv_in_sizemove=1;
-    if (_viv_is_fullscreen)
-    {
-        _viv_fullscreen_is_maxed=0;
-        _viv_toggle_fullscreen();
-    }
-    if (IsZoomed(_viv_hwnd))ShowWindow(_viv_hwnd,SW_RESTORE);
-
-    _viv_fitting_window=1;
-    SetWindowPos(_viv_hwnd,NULL,x,y,width,height,SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOCOPYBITS);
-    _viv_fitting_window=was_fitting;
-    _viv_in_sizemove=was_moving;
-    if (screen_filling)_viv_user_sized_window=1;
-    if (_viv_user_sized_window)_viv_remember_manual_size();
-    _viv_fit_last_valid=GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);
+    SetRect(target,x,y,x+width,y+height);
+    return full_frame || !EqualRect(original,target);
 }
 
 static void _viv_set_view_mode(BOOL standard)
 {
-    RECT original,photo,work;
+    RECT original,photo,work,target;
     POINT origin={0,0};
+    BYTE was_fitting=_viv_fitting_window;
     BOOL screen_filling=FALSE;
     BOOL refit=(!!config_show_caption!=standard) && !_viv_zoom_pos && !_viv_1to1 &&
         _viv_doing!=_VIV_DOING_1TO1SCROLL && !IsIconic(_viv_hwnd) &&
@@ -14214,9 +14255,17 @@ static void _viv_set_view_mode(BOOL standard)
     config_show_thickframe=standard;
     config_show_status=0;
     config_show_controls=0;
-    _viv_update_frame();
+    refit=refit && _viv_mode_window_rect(&original,&photo,&work,screen_filling,standard,&target);
+    if (refit)_viv_fitting_window=1;
+    _viv_update_frame(refit?&target:NULL);
+    _viv_fitting_window=was_fitting;
 
-    if (refit)_viv_fit_mode_window(&original,&photo,&work,screen_filling,standard);
+    if (refit)
+    {
+        if (screen_filling)_viv_user_sized_window=1;
+        if (_viv_user_sized_window)_viv_remember_manual_size();
+        _viv_fit_last_valid=GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);
+    }
 }
 
 static void _viv_start_first_frame(void)

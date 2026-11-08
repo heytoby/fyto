@@ -36,6 +36,7 @@ static RECT fake_window,fake_restore;
 static POINT fake_cursor;
 static MONITORINFO fake_monitor;
 static int fake_zoomed,fake_iconic,fake_arranged,moves,toggles,native_drags,last_command,capture,occluded;
+static int frame_positions,frame_layouts,frame_redraws;
 static DWORD fake_now;
 static UINT_PTR active_timer;
 #define _VIV_DOING_1TO1SCROLL 5
@@ -50,8 +51,18 @@ static int _viv_get_controls_high(void){return 0;}
 static BOOL _viv_window_arranged(HWND hwnd){(void)hwnd;return fake_arranged;}
 static void _viv_toggle_fullscreen(void){
     toggles++;
-    if(_viv_is_fullscreen){_viv_is_fullscreen=0;fake_window=_viv_fullscreen_rect;}
-    else{_viv_fullscreen_rect=fake_window;_viv_is_fullscreen=1;fake_window=fake_monitor.rcMonitor;}
+    if (_viv_is_fullscreen)
+    {
+        if (_viv_changing_frame)frame_positions++;
+        _viv_is_fullscreen=0;
+        fake_window=_viv_fullscreen_rect;
+    }
+    else
+    {
+        _viv_fullscreen_rect=fake_window;
+        _viv_is_fullscreen=1;
+        fake_window=fake_monitor.rcMonitor;
+    }
 }
 static BOOL WINAPI fake_get_window_rect(HWND hwnd,LPRECT rect){assert(hwnd==_viv_hwnd);*rect=fake_window;return TRUE;}
 static BOOL WINAPI fake_get_monitor_info(HMONITOR handle,LPMONITORINFO info){(void)handle;*info=fake_monitor;return TRUE;}
@@ -62,8 +73,39 @@ static BOOL WINAPI fake_is_iconic(HWND hwnd){(void)hwnd;return fake_iconic;}
 static BOOL WINAPI fake_show_window(HWND hwnd,int show){(void)hwnd;assert(show==SW_RESTORE);fake_zoomed=fake_iconic=0;fake_window=fake_restore;return TRUE;}
 static BOOL WINAPI fake_window_placement(HWND hwnd,WINDOWPLACEMENT *p){(void)hwnd;p->rcNormalPosition=fake_restore;return TRUE;}
 static BOOL WINAPI fake_set_window_pos(HWND hwnd,HWND after,int x,int y,int w,int h,UINT flags){
-    (void)after;(void)flags;assert(hwnd==_viv_hwnd);moves++;SetRect(&fake_window,x,y,x+w,y+h);fake_arranged=0;return TRUE;
+    RECT previous=fake_window;
+    (void)after;assert(hwnd==_viv_hwnd);
+    if (_viv_changing_frame)
+    {
+        assert((flags & SWP_FRAMECHANGED) && !(flags & SWP_NOCOPYBITS));
+        assert(frame_positions==frame_redraws);
+        frame_positions++;
+    }
+    if (flags & SWP_NOMOVE){x=previous.left;y=previous.top;}
+    if (flags & SWP_NOSIZE){w=previous.right-previous.left;h=previous.bottom-previous.top;}
+    SetRect(&fake_window,x,y,x+w,y+h);
+    if (!EqualRect(&previous,&fake_window)){moves++;fake_arranged=0;}
+    return TRUE;
 }
+static BOOL WINAPI fake_set_window_placement(HWND hwnd,const WINDOWPLACEMENT *p)
+{
+    RECT r=p->rcNormalPosition;
+    assert(fake_zoomed && p->showCmd==SW_SHOWNORMAL);
+    fake_zoomed=0;
+    return fake_set_window_pos(hwnd,NULL,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_FRAMECHANGED);
+}
+static BOOL WINAPI fake_redraw(HWND hwnd,const RECT *rect,HRGN region,UINT flags)
+{
+    const UINT required=RDW_FRAME|RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_UPDATENOW;
+    assert(hwnd==_viv_hwnd && !rect && !region && (flags & required)==required);
+    assert(!_viv_changing_frame && frame_positions==frame_redraws+1 && frame_layouts==frame_redraws+1);
+    frame_redraws++;
+    return TRUE;
+}
+static LONG WINAPI fake_get_window_long(HWND hwnd,int index){(void)hwnd;(void)index;return WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX;}
+static LONG WINAPI fake_set_window_long(HWND hwnd,int index,LONG style){(void)hwnd;(void)index;return style;}
+static HMENU WINAPI fake_get_menu(HWND hwnd){(void)hwnd;return NULL;}
+static BOOL WINAPI fake_set_menu(HWND hwnd,HMENU menu){(void)hwnd;(void)menu;return TRUE;}
 static BOOL WINAPI fake_cursor_position(LPPOINT p){*p=fake_cursor;return TRUE;}
 static HWND WINAPI fake_window_at_point(POINT p){return occluded||!PtInRect(&fake_window,p)?(HWND)(INT_PTR)2:_viv_hwnd;}
 static BOOL WINAPI fake_screen_to_client(HWND hwnd,LPPOINT p){(void)hwnd;p->x-=fake_window.left;p->y-=fake_window.top+title_height();return TRUE;}
@@ -99,7 +141,15 @@ static void _viv_command(int id){(void)id;}
 #define IsIconic fake_is_iconic
 #define ShowWindow fake_show_window
 #define GetWindowPlacement fake_window_placement
+#define SetWindowPlacement fake_set_window_placement
 #define SetWindowPos fake_set_window_pos
+#define RedrawWindow fake_redraw
+#undef GetWindowLong
+#define GetWindowLong fake_get_window_long
+#undef SetWindowLong
+#define SetWindowLong fake_set_window_long
+#define GetMenu fake_get_menu
+#define SetMenu fake_set_menu
 #define GetCursorPos fake_cursor_position
 #define WindowFromPoint fake_window_at_point
 #define ScreenToClient fake_screen_to_client
@@ -131,7 +181,9 @@ static void os_MonitorRectFromWindow(HWND hwnd,int fullscreen,RECT *rect)
     (void)hwnd;
     *rect=fullscreen?fake_monitor.rcMonitor:fake_monitor.rcWork;
 }
-static void _viv_update_frame(void){}
+static void _viv_on_size(void){assert(!_viv_changing_frame);frame_layouts++;}
+static void _viv_status_show(int show){(void)show;}
+static void _viv_controls_show(int show){(void)show;}
 #include "../build/presentation-under-test.h"
 
 static int same_rect(const RECT *a,const RECT *b){return !memcmp(a,b,sizeof(*a));}
@@ -156,6 +208,7 @@ static void reset(void){
     SetRect(&fake_window,100,100,1060,740);fake_restore=fake_window;_viv_fullscreen_rect=fake_window;
     fake_cursor.x=200;fake_cursor.y=200;
     fake_zoomed=fake_iconic=fake_arranged=moves=toggles=native_drags=last_command=capture=occluded=0;
+    frame_positions=frame_layouts=frame_redraws=0;
     fyto_window_drag_pending=fyto_window_drag_from_image=fyto_image_hover=fyto_hover_pressed=0;config_ontop=0;
     ZeroMemory(&fyto_hover_fade,sizeof(fyto_hover_fade));fake_now=1000;active_timer=0;
     wcscpy_s(current_file.cFileName,MAX_PATH,L"Terrace-light_01.jpg");
@@ -281,7 +334,7 @@ int wmain(void){
     assert(config_show_caption && fake_window.left==before.left &&
            fake_window.top+title_height()==before.top && fake_window.bottom==before.bottom);
     _viv_set_view_mode(FALSE);
-    assert(moves==2 && same_rect(&fake_window,&before) && !_viv_user_sized_window);
+    assert(moves==2 && frame_redraws==2 && same_rect(&fake_window,&before) && !_viv_user_sized_window);
     cases++;
     /* Removing the title row trims both kinds of letterbox around the old image. */
     for (p=0; p<2; p++)

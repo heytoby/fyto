@@ -237,13 +237,25 @@ final class Fyto: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let previous = window.frame
         canvas.layoutSubtreeIfNeeded()
         let oldPhoto = window.convertToScreen(canvas.convert(canvas.photoFrame, to: nil))
-        standard.toggle()
+        let nextMode = !standard
+        let target: NSRect
+        if let photo, let screen, canvas.zoom == 1, !oldPhoto.isEmpty {
+            target = modeFrame(previous: previous, picture: oldPhoto, pixels: photo.size(turned: turns),
+                               work: screen.visibleFrame, standard: nextMode)
+        } else {
+            target = previous
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            standard = nextMode
+            if target != previous { window.setFrame(target, display: false, animate: false) }
+            canvas.refreshControls()
+            canvas.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+        }
         UserDefaults.standard.set(standard, forKey: "standardMode")
-        canvas.refreshControls()
-        guard let photo, let screen, canvas.zoom == 1, !oldPhoto.isEmpty else { return }
-        let target = modeFrame(previous: previous, picture: oldPhoto, pixels: photo.size(turned: turns),
-                               work: screen.visibleFrame, standard: standard)
-        if target != previous { window.setFrame(target, display: true) }
     }
 
     private func modeFrame(previous: NSRect, picture: NSRect, pixels: CGSize, work: NSRect,

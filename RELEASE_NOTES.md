@@ -1,3 +1,3 @@
-# fyto 1.0.0.42
+# fyto 1.0.0.43
 
-Use system fonts on Windows and macOS to reduce installer size.
+修复极简模式与标准模式切换时的闪烁。标题栏和图片区域使用同一次布局更新，普通窗口沿切换前的图片位置收边。
