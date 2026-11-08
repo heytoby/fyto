@@ -27,12 +27,36 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
           $status = Get-MpComputerStatus
-          $status | Select-Object AMRunningMode, AntivirusEnabled, AMServiceEnabled, AntivirusSignatureVersion
-          if (!$status.AntivirusEnabled -or !$status.AMServiceEnabled) {
+          $status | Select-Object AMRunningMode, AntivirusEnabled, AMServiceEnabled, AntivirusSignatureVersion | ConvertTo-Json -Compress
+          if (!$status.AntivirusEnabled -or !$status.AMServiceEnabled -or !$status.AntivirusSignatureVersion) {
             throw 'Microsoft Defender Antivirus is unavailable on this runner.'
           }
+          $staged = Join-Path $env:RUNNER_TEMP 'fyto-scan'
           $archive = Join-Path $env:RUNNER_TEMP 'fyto-Windows-x64.zip'
-          Compress-Archive -Path "$env:RUNNER_TEMP/fyto-scan/*" -DestinationPath $archive
-          python ./scripts/Verify-WindowsRelease.py $archive 1.0.0.43
-          if ($LASTEXITCODE -ne 0) { throw 'The staged Windows installers failed verification.' }
+          Compress-Archive -Path "$staged/*" -DestinationPath $archive
+          $amResult = & python ./scripts/Verify-WindowsRelease.py $archive 1.0.0.43 2>&1
+          $amExit = $LASTEXITCODE
+          $amResult | ForEach-Object { Write-Host $_ }
+          if ($amExit -eq 0) { exit 0 }
+          if (($amResult | Out-String).Trim() -notmatch '^AMSI scan failed for fyto-Setup-1\.0\.0\.43\.(msi|exe): 0x80070015$') {
+            throw 'The staged files failed package verification.'
+          }
+          $platform = Join-Path $env:ProgramData 'Microsoft/Windows Defender/Platform'
+          $scanner = Get-ChildItem -LiteralPath $platform -Directory | Sort-Object LastWriteTime -Descending |
+            ForEach-Object { Join-Path $_.FullName 'MpCmdRun.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (!$scanner) { throw 'MpCmdRun.exe was not found.' }
+          $checksums = Get-Content -LiteralPath (Join-Path $staged 'SHA256SUMS.txt')
+          foreach ($name in 'fyto-Setup-1.0.0.43.msi','fyto-Setup-1.0.0.43.exe') {
+            $path = Join-Path $staged $name
+            $before = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ("$before  $name" -cnotin $checksums) { throw "Unexpected hash for $name." }
+            # Run a report-only custom scan of these staging copies, including archives and excluded paths.
+            & $scanner -Scan -ScanType 3 -File $path -DisableRemediation
+            if ($LASTEXITCODE -ne 0) { throw "Microsoft Defender flagged $name or could not scan it ($LASTEXITCODE)." }
+            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $before) {
+              throw "The bytes of $name changed during scanning."
+            }
+            Write-Host "FYTO_DEFENDER_SCAN $name $before"
+          }
