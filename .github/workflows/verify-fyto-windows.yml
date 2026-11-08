@@ -1,0 +1,38 @@
+name: Scan fyto 1.0.0.43 Windows build
+
+on:
+  push:
+    branches: [verify/fyto-1.0.0.43]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  scan:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: f8c68732464183105c07270daba52cf6fb23fb38
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyto-Windows-x64
+          run-id: 42481569121
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/fyto-scan
+      - name: Verify Defender and scan staged Windows installers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = Get-MpComputerStatus
+          $status | Select-Object AMRunningMode, AntivirusEnabled, AMServiceEnabled, AntivirusSignatureVersion
+          if (!$status.AntivirusEnabled -or !$status.AMServiceEnabled) {
+            throw 'Microsoft Defender Antivirus is unavailable on this runner.'
+          }
+          $archive = Join-Path $env:RUNNER_TEMP 'fyto-Windows-x64.zip'
+          Compress-Archive -Path "$env:RUNNER_TEMP/fyto-scan/*" -DestinationPath $archive
+          python ./scripts/Verify-WindowsRelease.py $archive 1.0.0.43
+          if ($LASTEXITCODE -ne 0) { throw 'The staged Windows installers failed verification.' }
