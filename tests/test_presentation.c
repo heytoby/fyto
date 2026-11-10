@@ -32,6 +32,9 @@ static int _viv_dst_pos_x=500,_viv_dst_pos_y=500,_viv_view_x,_viv_view_y;
 static int _viv_dst_zoom_x_pos,_viv_dst_zoom_y_pos;
 static float zoom_values[]={1.0f},*_viv_dst_zoom_values=zoom_values;
 static WIN32_FIND_DATAW current_file,*_viv_current_fd=&current_file;
+static struct { HBITMAP hbitmap; } _viv_preview;
+static BOOL title_deferred, title_dirty;
+static const wchar_t *_viv_presented_path(void){return current_file.cFileName;}
 static RECT fake_window,fake_restore;
 static POINT fake_cursor;
 static MONITORINFO fake_monitor;
@@ -131,6 +134,9 @@ static void _viv_update_src_pixel(int a,int b){(void)a;(void)b;}
 static void _viv_status_update(void){}
 static void _viv_update_1to1_scroll(int x,int y){(void)x;(void)y;}
 static void _viv_update_show_cursor(void){}
+static void _viv_update_title(void){assert(title_deferred);title_dirty=TRUE;}
+static void title_paint(HWND hwnd){assert(hwnd==_viv_hwnd&&!title_deferred);title_dirty=FALSE;}
+static void _viv_update_exif(void){}
 static void _viv_command(int id){(void)id;}
 #undef GetMonitorInfo
 #define GetMonitorInfo fake_get_monitor_info
@@ -204,6 +210,7 @@ static void reset(void){
     config_fullscreen_fill_window=config_fill_window=config_keep_aspect_ratio=config_allow_shrinking=1;
     config_show_caption=config_show_exif=config_auto_zoom=config_auto_zoom_type=config_left_click_action=0;
     _viv_is_slideshow=_viv_doing=fyto_formats_window=0;
+    _viv_preview.hbitmap=NULL;title_deferred=title_dirty=FALSE;
     SetRect(&fake_monitor.rcMonitor,0,0,2560,1440);SetRect(&fake_monitor.rcWork,0,0,2560,1392);
     SetRect(&fake_window,100,100,1060,740);fake_restore=fake_window;_viv_fullscreen_rect=fake_window;
     fake_cursor.x=200;fake_cursor.y=200;
@@ -553,6 +560,9 @@ int wmain(void){
         fake_now+=30;point=fake_cursor;fyto_update_image_hover(point);assert(fyto_hover_fade.started==1000);
         fake_now+=120;fyto_hover_input(_viv_hwnd,WM_TIMER,FYTO_HOVER_FADE_TIMER,0);assert(!active_timer);
         memcpy(pixels,clean,bytes);fyto_paint_image_hover(dc);memcpy(full,pixels,bytes);
+        _viv_frame_count=0;_viv_preview.hbitmap=bitmap;
+        memcpy(pixels,clean,bytes);fyto_paint_image_hover(dc);assert(!memcmp(pixels,full,bytes));
+        _viv_frame_count=1;_viv_preview.hbitmap=NULL;cases++;
         for(y=0;y<640;y++)for(x=0;x<960;x++)if(clean[y*960+x]!=pixels[y*960+x])different++;
         assert(different>50 && different<10000);save_bmp("build/hover-preview.bmp",dc,bitmap,960,640,pixels);
         assert(fyto_visible_image_rect(&visible));_viv_viewport_rect(&canvas);fyto_hover_layout(&visible,&canvas,96,96,&layout);
