@@ -1,5 +1,5 @@
 ﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="fyto 中文版" Manufacturer="fyto Community" Version="1.0.43" UpgradeCode="A9C96FF0-C5C9-41CD-BF19-E0E825F7E76B" Language="2052" Codepage="936" Scope="perMachine" InstallerVersion="500">
+  <Package Name="fyto 中文版" Manufacturer="fyto Community" Version="1.0.44" UpgradeCode="A9C96FF0-C5C9-41CD-BF19-E0E825F7E76B" Language="2052" Codepage="936" Scope="perMachine" InstallerVersion="500">
     <MajorUpgrade Schedule="afterInstallExecute" DowngradeErrorMessage="已安装较新版本。" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
     <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" />
@@ -40,7 +40,7 @@
           <RegistryValue Root="HKLM" Key="Software\fyto" Name="InstallLocation" Type="string" Value="[INSTALLFOLDER]" />
           <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\fyto.exe" Type="string" Value="[#ViewerExe]" />
           <RegistryValue Root="HKLM" Key="Software\Classes\Applications\fyto.exe\shell\open\command" Type="string" Value="&quot;[#ViewerExe]&quot; &quot;%1&quot;" />
-          <Shortcut Id="ViewerStartMenu" Directory="ProgramMenuFolder" Name="fyto 中文版" Advertise="yes" Icon="FytoIcon22" />
+          <Shortcut Id="ViewerStartMenu" Directory="ProgramMenuFolder" Name="fyto 中文版" Target="[#ViewerExe]" WorkingDirectory="INSTALLFOLDER" />
           <Shortcut Id="ViewerDesktop" Directory="DesktopFolder" Name="fyto" Target="[#ViewerExe]" WorkingDirectory="INSTALLFOLDER" Icon="FytoIcon22" />
         </Component>
         <Component Id="Legacy64" Guid="A9ED14C7-7D91-4296-9A91-0F6D78FC37D9" Bitness="always64" Condition="OLDVIEW=64 AND INSTALLFOLDER~=OLDINSTALLDIR">

@@ -257,6 +257,7 @@
 #define _VIV_STRETCH_BLT_STITCH_SIZE		512
 
 #include "viv.h"
+#include "fast_jpeg.h"
 #include "image_fit.h"
 #include "l10n.h"
 #include "exif.h"
@@ -283,6 +284,7 @@ enum
 	_VIV_REPLY_LOAD_IMAGE_COMPLETE = 0,
 	_VIV_REPLY_LOAD_IMAGE_FAILED,
 	_VIV_REPLY_LOAD_IMAGE_FIRST_FRAME,
+	_VIV_REPLY_LOAD_IMAGE_PREVIEW,
 	_VIV_REPLY_LOAD_IMAGE_ADDITIONAL_FRAME,
 };
 
@@ -370,6 +372,13 @@ typedef struct _viv_reply_load_image_first_frame_s
 	
 }_viv_reply_load_image_first_frame_t;
 
+typedef struct _viv_preview_s
+{
+    HBITMAP hbitmap;
+    UINT wide, high; // raster size
+    UINT image_wide, image_high; // original size after EXIF orientation
+} _viv_preview_t;
+
 typedef struct _viv_playlist_s
 {
 	struct _viv_playlist_s *next;
@@ -426,6 +435,7 @@ static int _viv_init(int nCmdShow);
 static void _viv_kill(void);
 static void _viv_exit(void);
 static int _viv_next(int prev,int reset_slideshow_timer,int is_preload,int wait_for_current_load);
+static void _viv_next_manual(int prev, int repeat);
 static void _viv_home(int end,int is_preload);
 static int _viv_is_valid_filename(WIN32_FIND_DATA *fd);
 static int _viv_is_msg(MSG *msg);
@@ -661,6 +671,14 @@ static int _viv_frame_loaded_count = 0; // number of loaded frames, can be less 
 static int _viv_frame_position = 0; // the current frame position
 static BYTE _viv_frame_looped = 0; // all frames have been displayed for this animation
 static BYTE _viv_is_slideshow_timeup = 0; // the slideshow timer has expired, but we are still showing an animation at least once.
+static _viv_preview_t _viv_preview;
+static struct
+{
+    HANDLE changes;
+    WIN32_FIND_DATA from, to;
+    int previous, sort, ascending;
+    BOOL ready;
+} _viv_neighbor;
 static _viv_frame_t *_viv_frames = 0; // the frames that make up an image, could be more than one for animations.
 static VIV_UINT64 _viv_timer_tick = 0; // the current tick for the current frame.
 static BYTE _viv_is_animation_timer = 0; // animation timer started?
@@ -1255,8 +1273,35 @@ static void _viv_mipmap_free(_viv_mipmap_t *mipmap)
 // delay this until after the new image is shown.
 // we add the clear to a queue which is cleared with _viv_process_pending_clear.
 // _viv_process_pending_clear should be called after the new frame is shown.
+// Budget 600 MiB for the previous and next decoded images combined.
+static BOOL _viv_cache_image_fits(UINT wide, UINT high, UINT frames)
+{
+    UINT64 pixels;
+    if (!wide || !high || !frames) return FALSE;
+    pixels = (300ull * 1024 * 1024 / 4) / frames;
+    for (;;)
+    {
+        UINT64 level = (UINT64)wide * high;
+        if (level > pixels) return FALSE;
+        pixels -= level;
+        if (wide == 1 && high == 1) return TRUE;
+        wide = wide / 2 + (wide & 1);
+        high = high / 2 + (high & 1);
+    }
+}
+
+static void _viv_clear_preview(void)
+{
+    if (_viv_preview.hbitmap)
+    {
+        DeleteObject(_viv_preview.hbitmap);
+        _viv_preview.hbitmap = NULL;
+    }
+}
+
 static void _viv_clear(void)
 {
+    _viv_clear_preview();
 	_viv_pending_clear_frames = _viv_frames;
 	_viv_pending_clear_frame_loaded_count = _viv_frame_loaded_count;
 	_viv_frames = NULL;
@@ -1422,8 +1467,36 @@ debug_printf("open filename: %S\n",full_path_and_filename);
 }
 
 // _viv_load_image_thread will be NULL if is_preload is 1.
+static BOOL _viv_same_image(const WIN32_FIND_DATA *a, const WIN32_FIND_DATA *b)
+{
+    return a->nFileSizeHigh == b->nFileSizeHigh &&
+        a->nFileSizeLow == b->nFileSizeLow &&
+        CompareFileTime(&a->ftLastWriteTime, &b->ftLastWriteTime) == 0 &&
+        string_compare(a->cFileName, b->cFileName) == 0;
+}
+
+static void _viv_close_neighbor_watch(void)
+{
+    if (_viv_neighbor.changes && _viv_neighbor.changes != INVALID_HANDLE_VALUE)
+        FindCloseChangeNotification(_viv_neighbor.changes);
+    _viv_neighbor.changes = NULL;
+    _viv_neighbor.ready = FALSE;
+}
+
 static void _viv_open(WIN32_FIND_DATA *fd,int is_preload)
 {
+    if (is_preload && _viv_neighbor.changes && _viv_neighbor.changes != INVALID_HANDLE_VALUE &&
+        WaitForSingleObject(_viv_neighbor.changes, 0) == WAIT_TIMEOUT)
+    {
+        int order = _viv_fd_compare(fd, &_viv_neighbor.from);
+        // Leave wraparound to the original navigation path, particularly for the wheel.
+        if (_viv_neighbor.previous ? order < 0 : order > 0)
+        {
+            _viv_neighbor.to = *fd;
+            _viv_neighbor.ready = TRUE;
+        }
+    }
+
     if(is_preload && (_viv_load_image_thread || (_viv_load_image_next_fd && !_viv_load_image_next_is_preload)))return;
     if(!is_preload){os_copy_memory(&_viv_requested_fd,fd,sizeof(WIN32_FIND_DATA));if(_viv_load_image_next_fd){mem_free(_viv_load_image_next_fd);_viv_load_image_next_fd=NULL;}}
 
@@ -1452,14 +1525,14 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 		}
 	}
 
-	if ((is_preload) && (_viv_last_frames) && (string_compare(_viv_last_fd->cFileName,fd->cFileName) == 0))
+	if ((is_preload) && (_viv_last_frames) && _viv_same_image(_viv_last_fd, fd))
 	{
 		// don't preload if its the same as last cache.
 		// this can occur if you have a playlist or folder with only 2 items.
 		return;
 	}
 	else
-	if ((!is_preload) && (_viv_last_frames) && (string_compare(_viv_last_fd->cFileName,fd->cFileName) == 0))
+	if ((!is_preload) && (_viv_last_frames) && _viv_same_image(_viv_last_fd, fd))
 	{
 		// activate last cache
 		// don't activate preload.
@@ -1490,14 +1563,14 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 		return;
 	}
 	else
-	if ((!is_preload) && (_viv_load_is_preload) && (*_viv_preload_fd->cFileName) && (string_compare(_viv_preload_fd->cFileName,fd->cFileName) == 0))
+	if ((!is_preload) && (_viv_load_is_preload) && (*_viv_preload_fd->cFileName) && _viv_same_image(_viv_preload_fd, fd))
 	{
 		_viv_open_preload();
 
 		return;
 	}
 	else
-	if ((!is_preload) && (_viv_load_image_thread) && (!_viv_load_image_terminate) && (_viv_load_image_filename) && (string_compare(_viv_load_image_filename,fd->cFileName) == 0))
+	if ((!is_preload) && (_viv_load_image_thread) && (!_viv_load_image_terminate) && (_viv_load_image_filename) && _viv_same_image(_viv_load_fd, fd))
 	{
 		debug_printf("already loading...\n");
 		// already loading this one..
@@ -1513,6 +1586,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 		// already loading a different image.
 		// add it to the queue and cancel this one.
 		debug_printf("SET TERMINATE (next)\n");
+        if (_viv_load_is_preload || _viv_preview.hbitmap) _viv_load_image_allow_draw = 0;
 		_viv_load_image_terminate = 1;
 		
 		if (_viv_load_image_next_fd)
@@ -1563,6 +1637,8 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 debug_printf("LOAD %S is_preload %d\n",_viv_load_image_filename,is_preload);
 
 		_viv_load_image_thread = CreateThread(NULL,0,_viv_load_image_thread_proc,0,0,&thread_id);
+        if (is_preload && _viv_load_image_thread)
+            SetThreadPriority(_viv_load_image_thread, THREAD_PRIORITY_BELOW_NORMAL);
 
 		_viv_status_update();
 	}
@@ -1694,11 +1770,11 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 			break;
 		
 		case VIV_ID_NAV_PREV:
-			_viv_next(1,1,0,is_key_repeat);
+			_viv_next_manual(1, is_key_repeat);
 			break;
 		
 		case VIV_ID_NAV_NEXT:
-			_viv_next(0,1,0,is_key_repeat);
+			_viv_next_manual(0, is_key_repeat);
 			break;
 		
 		case VIV_ID_NAV_HOME:
@@ -2976,6 +3052,25 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 							
 						break;
 										
+                    case _VIV_REPLY_LOAD_IMAGE_PREVIEW:
+                    {
+                        _viv_preview_t *preview = (_viv_preview_t *)(e + 1);
+                        if (!_viv_load_image_terminate && !_viv_load_is_preload &&
+                            string_compare(_viv_load_fd->cFileName, _viv_requested_fd.cFileName) == 0)
+                        {
+                            viv_copy_current_image_to_last_image();
+                            _viv_clear();
+                            _viv_preview = *preview;
+                            preview->hbitmap = NULL;
+                            _viv_image_wide = _viv_preview.image_wide;
+                            _viv_image_high = _viv_preview.image_high;
+                            os_copy_memory(_viv_frame_fd, _viv_load_fd, sizeof(WIN32_FIND_DATA));
+                            _viv_start_first_frame();
+                            _viv_process_pending_clear();
+                        }
+                        break;
+                    }
+
 					case _VIV_REPLY_LOAD_IMAGE_FIRST_FRAME:
 						
 						{
@@ -3021,8 +3116,15 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 								
 								if (_viv_load_is_preload)
 								{
+                                    if (!_viv_cache_image_fits(first_frame->wide, first_frame->high, first_frame->frame_count))
+                                    {
+                                        _viv_clear_preload();
+                                        _viv_load_image_allow_draw = 0;
+                                        _viv_load_image_terminate = 1;
+                                        break;
+                                    }
 									_viv_clear_preload_frames();
-									
+
 									_viv_preload_image_wide = first_frame->wide;
 									_viv_preload_image_high = first_frame->high;
 									_viv_preload_frame_count = first_frame->frame_count;
@@ -3041,10 +3143,17 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 								}
 								else
 								{
-									// copy the image, not the filename.
-									viv_copy_current_image_to_last_image();
-
-									_viv_clear();
+                                    BOOL replace_preview = _viv_preview.hbitmap &&
+                                        _viv_image_wide == (int)first_frame->wide &&
+                                        _viv_image_high == (int)first_frame->high &&
+                                        string_compare(_viv_frame_fd->cFileName, _viv_load_fd->cFileName) == 0;
+                                    if (replace_preview)
+                                        _viv_clear_preview();
+                                    else
+                                    {
+                                        viv_copy_current_image_to_last_image();
+                                        _viv_clear();
+                                    }
 
 									_viv_image_wide = first_frame->wide;
 									_viv_image_high = first_frame->high;
@@ -3060,10 +3169,16 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 									first_frame->frame.hbitmap = 0;
 									first_frame->frame.mipmap = NULL;
 									_viv_frame_loaded_count = 1;
-									
-									_viv_start_first_frame();
-									
-									_viv_process_pending_clear();
+
+                                    if (replace_preview)
+                                    {
+                                        _viv_status_update();
+                                        InvalidateRect(_viv_hwnd, NULL, FALSE);
+                                        UpdateWindow(_viv_hwnd);
+                                    }
+                                    else
+                                        _viv_start_first_frame();
+                                    _viv_process_pending_clear();
 								}
 							}
 						}
@@ -4316,7 +4431,7 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 						ExcludeClipRect(ps.hdc,rect.left,rect.top,rect.right,rect.bottom);
 					}
 				*/
-					if (_viv_frame_count)
+					if (_viv_preview.hbitmap || _viv_frame_count)
 					{
 						HDC mem_hdc;
 						
@@ -4350,7 +4465,14 @@ debug_printf("NEXT AFTER LOAD %S\n",fd->cFileName);
 							int mip_high;
 							
 debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
-							mip_hbitmap = _viv_get_mipmap(_viv_frames[_viv_frame_position].hbitmap,_viv_image_wide,_viv_image_high,rw,rh,&mip_wide,&mip_high,&_viv_frames[_viv_frame_position].mipmap);
+							if (_viv_preview.hbitmap)
+                            {
+                                mip_hbitmap = _viv_preview.hbitmap;
+                                mip_wide = _viv_preview.wide;
+                                mip_high = _viv_preview.high;
+                            }
+                            else
+                                mip_hbitmap = _viv_get_mipmap(_viv_frames[_viv_frame_position].hbitmap,_viv_image_wide,_viv_image_high,rw,rh,&mip_wide,&mip_high,&_viv_frames[_viv_frame_position].mipmap);
 							
 							if (mip_hbitmap)
 							{
@@ -5700,6 +5822,7 @@ static void _viv_kill(void)
 	_viv_key_clear_all(_viv_key_list);
 	mem_free(_viv_key_list);
 	
+    _viv_close_neighbor_watch();
 	os_kill();
 
 #ifdef _DEBUG
@@ -6336,7 +6459,9 @@ static void _viv_home(int end,int is_preload)
 			string_copy(search_wbuf,path_wbuf);
 			string_cat_utf8(search_wbuf,(const utf8_t *)"\\*.*");
 		
-			h = FindFirstFile(search_wbuf,&fd);
+			h = FindFirstFileExW(search_wbuf, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+                if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_INVALID_PARAMETER)
+                    h = FindFirstFile(search_wbuf, &fd);
 			
 			if (h != INVALID_HANDLE_VALUE)
 			{
@@ -10276,11 +10401,69 @@ static int _viv_webp_frame_proc(_viv_webp_t *viv_webp,BYTE *pixels,int delay)
 // 15.850 - SHCreateStreamOnFile
 // 14.914 - _viv stream - 1MB file buffer
 // 14.914 - _viv stream
+static BOOL _viv_load_fast_jpeg(IStream *stream, int *known_orientation, _viv_reply_load_image_first_frame_t *frame)
+{
+    fyto_jpeg jpeg = {0};
+    BOOL loaded = FALSE;
+
+    if (fyto_jpeg_open(&jpeg, stream, config_icm))
+    {
+        int orientation = config_orientation ? fyto_jpeg_orientation(&jpeg) : 0;
+        if (orientation < 0) orientation = os_get_orientation(_viv_load_image_filename);
+        *known_orientation = orientation;
+        if (!_viv_load_is_preload && !_viv_load_image_terminate)
+        {
+            _viv_preview_t preview = {0};
+            UINT edge = min(2048, max(960, max(_viv_load_render_wide, _viv_load_render_high)));
+            preview.hbitmap = fyto_jpeg_preview(&jpeg, edge, &preview.wide, &preview.high);
+            if (preview.hbitmap)
+            {
+                preview.image_wide = jpeg.wide;
+                preview.image_high = jpeg.high;
+                if (orientation > 1)
+                {
+                    HBITMAP oriented = _viv_orientate_hbitmap(preview.hbitmap, orientation);
+                    DeleteObject(preview.hbitmap);
+                    preview.hbitmap = oriented;
+                    if (orientation >= 5 && orientation <= 8)
+                    {
+                        UINT wide = preview.wide;
+                        preview.wide = preview.high;
+                        preview.high = wide;
+                        preview.image_wide = jpeg.high;
+                        preview.image_high = jpeg.wide;
+                    }
+                }
+                if (preview.hbitmap)
+                    _viv_reply_add(_VIV_REPLY_LOAD_IMAGE_PREVIEW, sizeof(preview), &preview);
+            }
+        }
+
+        if (!_viv_load_image_terminate || _viv_load_image_allow_draw)
+        {
+            frame->frame.hbitmap = fyto_jpeg_full(&jpeg, orientation, &frame->wide, &frame->high);
+            if (frame->frame.hbitmap)
+            {
+                int mip_wide, mip_high;
+                frame->frame_count = 1;
+                _viv_get_mipmap(frame->frame.hbitmap, frame->wide, frame->high,
+                    _viv_load_render_wide, _viv_load_render_high, &mip_wide, &mip_high, &frame->frame.mipmap);
+                _viv_reply_add(_VIV_REPLY_LOAD_IMAGE_FIRST_FRAME, sizeof(*frame), frame);
+                loaded = TRUE;
+            }
+        }
+    }
+
+    fyto_jpeg_close(&jpeg);
+    return loaded;
+}
+
 static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 {
 	_viv_reply_load_image_first_frame_t first_frame;
 	IStream *stream;
 	int ret;
+	BOOL jpeg_file = FALSE;
 	DWORD tickstart;
 
 	tickstart = GetTickCount();
@@ -10330,11 +10513,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 					{
 						DWORD readsize;
 
-//						if (_viv_load_image_terminate)
-//						{
-//							totreadsize = 0;
-//							break;
-//						}
+                        if (_viv_load_image_terminate && !_viv_load_image_allow_draw) break;
 
 						readsize = 1 * 1024 * 1024;
 						
@@ -10359,6 +10538,8 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 						}
 					}
 
+                    jpeg_file = totreadsize == 0 && size >= 3 &&
+                        (BYTE)buf[0] == 0xff && (BYTE)buf[1] == 0xd8 && (BYTE)buf[2] == 0xff;
 					GlobalUnlock(global_handle);
 					
 					if (totreadsize == 0)
@@ -10412,26 +10593,22 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 
 	if (stream)
 	{
-		int orientation;
-		
-		debug_printf("stream %d\n",stream);
-		
-		if (config_orientation)
-		{
-			orientation = os_get_orientation(_viv_load_image_filename);
+        int orientation = -1;
 
-			debug_printf("orientation %d\n",orientation);
-		}
-		else
-		{
-			orientation = 0;
-		}
+        if (jpeg_file && _viv_load_fast_jpeg(stream, &orientation, &first_frame))
+            ret = 1;
+        else if (!_viv_load_image_terminate || _viv_load_image_allow_draw)
+        {
+            void *image = NULL;
+            int load_ret;
 
-//		if (!_viv_load_image_terminate)
-		{
-			void *image;
-			int load_ret;
-			
+            if (orientation < 0)
+                orientation = config_orientation ? os_get_orientation(_viv_load_image_filename) : 0;
+            if (jpeg_file)
+            {
+                LARGE_INTEGER start = {0};
+                stream->lpVtbl->Seek(stream, start, STREAM_SEEK_SET, NULL);
+            }
 			// not implemented.
 			load_ret = 1; 
 			
@@ -10554,7 +10731,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 													break;
 												}
 												
-												hbitmap = CreateCompatibleBitmap(screen_hdc,load_wide,load_high);
+												hbitmap = fyto_image_dib(load_wide,load_high,32,NULL);
 												if (hbitmap)
 												{
 													UINT image_flags;
@@ -10632,7 +10809,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 															frame.delay = 100;
 														}
 														
-														_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,_viv_load_render_wide/2,_viv_load_render_high/2,&mip_wide,&mip_high,&frame.mipmap);
+														_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,_viv_load_render_wide,_viv_load_render_high,&mip_wide,&mip_high,&frame.mipmap);
 
 														_viv_reply_add(_VIV_REPLY_LOAD_IMAGE_ADDITIONAL_FRAME,sizeof(_viv_frame_t),&frame);
 													}
@@ -10656,7 +10833,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 														}
 															
 														// preload first mipmap
-														_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,_viv_load_render_wide/2,_viv_load_render_high/2,&mip_wide,&mip_high,&first_frame.frame.mipmap);
+														_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,_viv_load_render_wide,_viv_load_render_high,&mip_wide,&mip_high,&first_frame.frame.mipmap);
 							
 														_viv_reply_add(_VIV_REPLY_LOAD_IMAGE_FIRST_FRAME,sizeof(_viv_reply_load_image_first_frame_t),&first_frame);
 
@@ -10744,6 +10921,11 @@ static void _viv_reply_free(_viv_reply_t *e)
 {
 	switch (e->type)
 	{
+        case _VIV_REPLY_LOAD_IMAGE_PREVIEW:
+            if (((_viv_preview_t *)(e + 1))->hbitmap)
+                DeleteObject(((_viv_preview_t *)(e + 1))->hbitmap);
+            break;
+
 		case _VIV_REPLY_LOAD_IMAGE_FIRST_FRAME:
 			
 			if (((_viv_reply_load_image_first_frame_t *)(e+1))->frame.hbitmap)
@@ -13907,7 +14089,7 @@ static void _viv_do_mousewheel_action(int action,int delta,int x,int y)
 			InvalidateRect(_viv_hwnd,0,FALSE);
 		}
 	}
- else if(action==1 || action==2){_viv_wheel_delta+=delta;while(_viv_wheel_delta>=WHEEL_DELTA || _viv_wheel_delta<=-WHEEL_DELTA){int positive=_viv_wheel_delta>0;_viv_wheel_delta+=positive?-WHEEL_DELTA:WHEEL_DELTA;_viv_wheel_navigation=1;_viv_next(action==1?positive:!positive,1,0,0);_viv_wheel_navigation=0;}}
+ else if(action==1 || action==2){_viv_wheel_delta+=delta;while(_viv_wheel_delta>=WHEEL_DELTA || _viv_wheel_delta<=-WHEEL_DELTA){int positive=_viv_wheel_delta>0;_viv_wheel_delta+=positive?-WHEEL_DELTA:WHEEL_DELTA;_viv_wheel_navigation=1;_viv_next_manual(action==1?positive:!positive, 0);_viv_wheel_navigation=0;}}
 }
 
 void viv_migrate_default_keys(void)
@@ -13974,167 +14156,154 @@ int viv_get_command_count(void)
 	return _VIV_COMMAND_COUNT;
 }
 
+static DWORD _viv_average_pixels(DWORD a, DWORD b, DWORD c, DWORD d)
+{
+    const DWORD mask = 0x00ff00ff;
+    DWORD rb = (a & mask) + (b & mask) + (c & mask) + (d & mask) + 0x00020002;
+    DWORD ga = ((a >> 8) & mask) + ((b >> 8) & mask) +
+               ((c >> 8) & mask) + ((d >> 8) & mask) + 0x00020002;
+    return ((rb >> 2) & mask) | (((ga >> 2) & mask) << 8);
+}
+
+static HBITMAP _viv_half_dib(HBITMAP source, int wide, int high, int half_wide, int half_high)
+{
+    DIBSECTION dib;
+    HBITMAP bitmap;
+    BYTE *pixels;
+    int y;
+    if (GetObject(source, sizeof(dib), &dib) != sizeof(dib) ||
+        dib.dsBm.bmBitsPixel != 32 || !dib.dsBm.bmBits ||
+        dib.dsBm.bmWidth != wide || dib.dsBmih.biHeight != -high ||
+        dib.dsBmih.biCompression != BI_RGB) return NULL;
+    bitmap = fyto_image_dib(half_wide, half_high, 32, &pixels);
+    if (!bitmap) return NULL;
+    GdiFlush();
+    for (y = 0; y < half_high; y++)
+    {
+        const BYTE *bits = (const BYTE *)dib.dsBm.bmBits;
+        const DWORD *row = (const DWORD *)(bits + (SIZE_T)(2 * y) * dib.dsBm.bmWidthBytes);
+        const DWORD *next = (const DWORD *)(bits + (SIZE_T)min(2 * y + 1, high - 1) * dib.dsBm.bmWidthBytes);
+        DWORD *dest = (DWORD *)pixels + (SIZE_T)y * half_wide;
+        int x;
+        for (x = 0; x < wide / 2; x++)
+            dest[x] = _viv_average_pixels(row[2 * x], row[2 * x + 1], next[2 * x], next[2 * x + 1]);
+        if (wide & 1)
+            dest[x] = _viv_average_pixels(row[2 * x], row[2 * x], next[2 * x], next[2 * x]);
+    }
+    return bitmap;
+}
+
+static HBITMAP _viv_make_half_bitmap(HBITMAP source, int wide, int high, int half_wide, int half_high)
+{
+    HBITMAP bitmap = _viv_half_dib(source, wide, high, half_wide, half_high);
+    HDC screen, src, dest;
+    HGDIOBJ previous_src = NULL, previous_dest = NULL;
+    BOOL copied = FALSE;
+    if (bitmap) return bitmap;
+    screen = GetDC(NULL);
+    if (!screen) return NULL;
+    src = CreateCompatibleDC(screen);
+    dest = CreateCompatibleDC(screen);
+    bitmap = fyto_image_dib(half_wide, half_high, 32, NULL);
+    if (src && dest && bitmap)
+    {
+        previous_src = SelectObject(src, source);
+        previous_dest = SelectObject(dest, bitmap);
+        if (previous_src && previous_dest)
+        {
+            SetStretchBltMode(dest, HALFTONE);
+            copied = StretchBlt(dest, 0, 0, half_wide, half_high, src, 0, 0, wide, high, SRCCOPY);
+        }
+    }
+    if (previous_src) SelectObject(src, previous_src);
+    if (previous_dest) SelectObject(dest, previous_dest);
+    if (src) DeleteDC(src);
+    if (dest) DeleteDC(dest);
+    ReleaseDC(NULL, screen);
+    if (!copied && bitmap)
+    {
+        DeleteObject(bitmap);
+        bitmap = NULL;
+    }
+    return bitmap;
+}
+
 static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int render_wide,int render_high,int *pmip_wide,int *pmip_high,_viv_mipmap_t **out_mip)
 {
-	int mip_wide;
-	int mip_high;
-	_viv_mipmap_t **pmip;
-	int depth;
-	HBITMAP best_hbitmap;
-	int best_wide;
-	int best_high;
+    while (image_wide > 1 || image_high > 1)
+    {
+        int wide = image_wide / 2 + (image_wide & 1);
+        int high = image_high / 2 + (image_high & 1);
+        if (wide < render_wide || high < render_high) break;
+        if (!*out_mip)
+        {
+            HBITMAP reduced = _viv_make_half_bitmap(hbitmap, image_wide, image_high, wide, high);
+            if (!reduced) break;
+            *out_mip = mem_alloc(sizeof(_viv_mipmap_t));
+            (*out_mip)->hbitmap = reduced;
+            (*out_mip)->mipmap = NULL;
+        }
+        hbitmap = (*out_mip)->hbitmap;
+        image_wide = wide;
+        image_high = high;
+        out_mip = &(*out_mip)->mipmap;
+    }
 
-//	debug_printf("GETMIP %d x %d => %d x %d\n",image_wide,image_high,render_wide,render_high);
-		
-	mip_wide = (image_wide + 1) / 2;
-	mip_high = (image_high + 1) / 2;
-		
-	if (mip_wide < 1)
-	{
-		mip_wide = 1;
-	}
-	
-	if (mip_high < 1)
-	{
-		mip_high = 1;
-	}
-		
-	if ((mip_wide == 1) && (mip_high == 1))
-	{
-		*pmip_wide = image_wide;
-		*pmip_high = image_high;
+    *pmip_wide = image_wide;
+    *pmip_high = image_high;
+    return hbitmap;
+}
 
-//			debug_printf("MIP %d: %d %d\n",1,image_wide,image_high);
+static void _viv_next_manual(int prev, int repeat)
+{
+    const WIN32_FIND_DATA *current = _viv_wheel_navigation && *_viv_requested_fd.cFileName
+        ? &_viv_requested_fd : _viv_current_fd;
+    if (_viv_load_is_preload || _viv_preview.hbitmap) repeat = 0;
 
-		return hbitmap;
-	}
-	
-	if ((render_wide >= mip_wide) || (render_high >= mip_wide))
-	{
-//			debug_printf("MIP 0: %d %d\n",mip_wide,mip_high);
-		*pmip_wide = image_wide;
-		*pmip_high = image_high;
-
-//			debug_printf("MIP %d: %d %d\n",1,image_wide,image_high);
-
-		return hbitmap;
-	}
-	
-	best_hbitmap = hbitmap;
-	best_wide = image_wide;
-	best_high = image_high;
-	
-	pmip = out_mip;
-	
-	depth = 1;
-	
-	for(;;)
-	{
-		if (!*pmip)
-		{
-			HDC screen_hdc;
-			HDC mem_hdc;
-			HDC mem2_hdc;
-			HGDIOBJ last_hbitmap;
-			HGDIOBJ last2_hbitmap;
-			int last_stretch_mode;
-			
-			debug_printf("GETMIPMAP %d: %d %d\n",depth,mip_wide,mip_high);
-			
-			// create mipmap..
-			*pmip = mem_alloc(sizeof(_viv_mipmap_t));
-			
-			screen_hdc = GetDC(0);
-			if (screen_hdc)
-			{
-				mem_hdc = CreateCompatibleDC(screen_hdc);
-				if (mem_hdc)
-				{
-					mem2_hdc = CreateCompatibleDC(screen_hdc);
-					if (mem2_hdc)
-					{
-						(*pmip)->mipmap = NULL;
-						(*pmip)->hbitmap = CreateCompatibleBitmap(screen_hdc,mip_wide,mip_high);
-						
-						last_hbitmap = SelectObject(mem_hdc,(*pmip)->hbitmap);
-						last2_hbitmap = SelectObject(mem2_hdc,best_hbitmap);
-						
-						last_stretch_mode = SetStretchBltMode(mem_hdc,HALFTONE);
-						
-						StretchBlt(mem_hdc,0,0,mip_wide,mip_high,mem2_hdc,0,0,best_wide,best_high,SRCCOPY);
-
-						SetStretchBltMode(mem_hdc,last_stretch_mode);
-						
-						SelectObject(mem_hdc,last_hbitmap);
-						SelectObject(mem2_hdc,last2_hbitmap);
-
-						DeleteDC(mem2_hdc);
-					}
-					
-					DeleteDC(mem_hdc);
-				}
-				
-				ReleaseDC(0,screen_hdc);
-			}
-		}
-
-		best_wide = mip_wide;
-		best_high = mip_high;
-		best_hbitmap = (*pmip)->hbitmap;
-		
-		mip_wide = (image_wide + 1) / (2<<depth);
-		mip_high = (image_high + 1) / (2<<depth);
-		
-		if (mip_wide < 1)
-		{
-			mip_wide = 1;
-		}
-		
-		if (mip_high < 1)
-		{
-			mip_high = 1;
-		}
-		
-		if ((mip_wide == 1) && (mip_high == 1))
-		{
-			*pmip_wide = best_wide;
-			*pmip_high = best_high;
-			
-//				debug_printf("MIP %d: %d %d\n",depth,best_wide,best_high);
-			
-			return best_hbitmap;
-		}
-		
-		if ((render_wide >= mip_wide) || (render_high >= mip_wide))
-		{
-			*pmip_wide = best_wide;
-			*pmip_high = best_high;
-			
-//				debug_printf("MIP %d: %d %d\n",depth,best_wide,best_high);
-			
-			return best_hbitmap;
-		}
-		
-		pmip = &(*pmip)->mipmap;
-		depth++;
-	}
+    if (config_preload_next && !_viv_playlist_start && !_viv_random && _viv_neighbor.ready &&
+        _viv_neighbor.previous == prev && _viv_neighbor.sort == config_nav_sort &&
+        _viv_neighbor.ascending == config_nav_sort_ascending &&
+        _viv_same_image(&_viv_neighbor.from, current) &&
+        WaitForSingleObject(_viv_neighbor.changes, 0) == WAIT_TIMEOUT &&
+        (!repeat || !_viv_load_image_thread || (_viv_load_frame_count > 1 && !_viv_load_image_terminate)))
+    {
+        WIN32_FIND_DATA next = _viv_neighbor.to;
+        _viv_last_is_prev = prev;
+        _viv_open(&next, 0);
+        if (_viv_is_slideshow)
+        {
+            KillTimer(_viv_hwnd, VIV_ID_SLIDESHOW_TIMER);
+            SetTimer(_viv_hwnd, VIV_ID_SLIDESHOW_TIMER, config_slideshow_rate, 0);
+        }
+    }
+    else
+        _viv_next(prev, 1, 0, repeat);
 }
 
 static void _viv_preload_next(void)
 {
-	if (config_preload_next)
-	{
-		//UpdateWindow(_viv_hwnd);
-		
-		_viv_next(_viv_last_is_prev,0,1,0);
-	}
+    _viv_close_neighbor_watch();
+    if (!config_preload_next) return;
+    if (!_viv_playlist_start && !_viv_random && *_viv_current_fd->cFileName)
+    {
+        wchar_t folder[STRING_SIZE];
+        string_get_path_part(folder, _viv_current_fd->cFileName);
+        _viv_neighbor.changes = FindFirstChangeNotificationW(folder, FALSE,
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE |
+            FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION);
+        _viv_neighbor.from = *_viv_current_fd;
+        _viv_neighbor.previous = _viv_last_is_prev;
+        _viv_neighbor.sort = config_nav_sort;
+        _viv_neighbor.ascending = config_nav_sort_ascending;
+    }
+    _viv_next(_viv_last_is_prev, 0, 1, 0);
 }
 
 // Fit the borderless window to the image, retaining a stable maximum envelope.
 static void _viv_remember_manual_size(void)
 {
     int rw,rh;
-    if(!_viv_frame_count || _viv_image_wide<=0 || _viv_image_high<=0){_viv_manual_long_edge=FYTO_DEFAULT_LONG_EDGE;return;}
+    if(_viv_image_wide<=0 || _viv_image_high<=0){_viv_manual_long_edge=FYTO_DEFAULT_LONG_EDGE;return;}
     _viv_get_render_size(&rw,&rh);
     _viv_manual_long_edge=max(1,max(rw,rh));
 }
@@ -14143,7 +14312,7 @@ static void _viv_fit_image_window(void)
 {
     RECT r,target;MONITORINFO mi;HMONITOR monitor;fyto_image_fit_t fit;int bw,bh,x,y,changed;
     if(!_viv_hwnd || fyto_formats_window || (_viv_user_sized_window && !_viv_fit_for_navigation) || _viv_is_fullscreen || _viv_in_sizemove || _viv_changing_frame ||
-       !_viv_frame_count || _viv_image_wide<=0 || _viv_image_high<=0 ||
+       _viv_image_wide<=0 || _viv_image_high<=0 ||
        IsZoomed(_viv_hwnd) || IsIconic(_viv_hwnd) || _viv_window_arranged(_viv_hwnd))return;
     GetWindowRect(_viv_hwnd,&r);monitor=MonitorFromWindow(_viv_hwnd,MONITOR_DEFAULTTONEAREST);
     mi.cbSize=sizeof(mi);if(!GetMonitorInfo(monitor,&mi))return;
@@ -14371,6 +14540,8 @@ debug_printf("activate preload\n");
 // copy the current image to the last image.
 static void viv_copy_current_image_to_last_image(void)
 {
+    // The last full image is still useful while a preview is being replaced.
+    if (_viv_preview.hbitmap) return;
 	if (_viv_last_frames)
 	{
 		_viv_clear_frames(_viv_last_frames,_viv_last_frame_count);
@@ -14385,7 +14556,8 @@ debug_printf("*** Cache LAST : %S\n",_viv_frame_fd->cFileName);
 	// Otherwise we need to reload the whole image again..
 	if (config_cache_last)
 	{
-		if (_viv_frame_count == _viv_frame_loaded_count)
+		if (_viv_frame_count == _viv_frame_loaded_count &&
+            _viv_cache_image_fits(_viv_image_wide, _viv_image_high, _viv_frame_count))
 		{
 			os_copy_memory(_viv_last_fd,_viv_frame_fd,sizeof(WIN32_FIND_DATA));
 			
@@ -15060,6 +15232,8 @@ static int _viv_clamp_zoom_pos(int zoom_pos)
 
 static void _viv_open_preload(void)
 {
+    if (_viv_load_image_thread)
+        SetThreadPriority(_viv_load_image_thread, THREAD_PRIORITY_NORMAL);
 	os_copy_memory(_viv_current_fd,_viv_preload_fd,sizeof(WIN32_FIND_DATA));
 		
 	_viv_update_title();
