@@ -2813,6 +2813,14 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
                 CloseHandle(scan->thread);
                 scan->thread = NULL;
                 _viv_directory_scan = NULL;
+                if (!scan->cancelled && scan->changes != INVALID_HANDLE_VALUE &&
+                    WaitForSingleObject(scan->changes, 0) == WAIT_OBJECT_0)
+                {
+                    _viv_free_directory(scan);
+                    if (config_preload_next && !_viv_active_load && !_viv_retired_load)
+                        _viv_next(_viv_last_is_prev, 0, 1, 0);
+                    return 0;
+                }
                 if (scan->cancelled)
                     _viv_free_directory(scan);
                 else
@@ -14468,9 +14476,6 @@ static DWORD WINAPI _viv_scan_directory(void *arg)
     wchar_t pattern[STRING_SIZE];
     size_t capacity = 0;
 
-    scan->changes = FindFirstChangeNotificationW(scan->folder, FALSE,
-        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE |
-        FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION);
     if (scan->changes != INVALID_HANDLE_VALUE)
     {
         string_copy(pattern, scan->folder);
@@ -14538,6 +14543,10 @@ static void _viv_schedule_directory_scan(void)
     ZeroMemory(scan, sizeof(*scan));
     scan->hwnd = _viv_hwnd;
     string_copy(scan->folder, folder);
+    // Keep the change notification alive after the enumeration thread exits.
+    scan->changes = FindFirstChangeNotificationW(scan->folder, FALSE,
+        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE |
+        FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION);
     scan->thread = CreateThread(NULL, 0, _viv_scan_directory, scan, 0, NULL);
     if (!scan->thread)
     {
