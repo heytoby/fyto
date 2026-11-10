@@ -97,27 +97,58 @@ jobs:
           }
 
           $shell = New-Object -ComObject WScript.Shell
-          $link = $shell.CreateShortcut($shortcut)
-          if ($link.TargetPath -ine $viewer.FullName) {
-            throw "Start menu shortcut resolved to $($link.TargetPath)"
-          }
-          if ($link.IconLocation -and $link.IconLocation -ne ',0' -and $link.IconLocation -ine ($viewer.FullName + ',0')) {
-            throw "Start menu shortcut uses an unexpected icon source $($link.IconLocation)"
+          $testLink = Join-Path $env:RUNNER_TEMP 'fyto-start-verify.lnk'
+          [IO.File]::Copy($shortcut, $testLink)
+          $link = $shell.CreateShortcut($testLink)
+          $bytes = [IO.File]::ReadAllBytes($shortcut)
+          $flags = [BitConverter]::ToUInt32($bytes, 20)
+          Write-Output ('FYTO_START_LINK_FLAGS 0x{0:X} length {1}' -f $flags, $bytes.Length)
+          if ($flags -band 0x1000) {
+            throw 'Start menu shortcut is still MSI-advertised'
           }
 
           Add-Type -TypeDefinition @'
           using System;
+          using System.Text;
           using System.Runtime.InteropServices;
+          using System.Runtime.InteropServices.ComTypes;
           public static class FytoVerifyShell {
+              [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+              private class ShellLink { }
+              [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+              private interface IShellLinkW {
+                  [PreserveSig]
+                  int GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int max, IntPtr findData, uint flags);
+              }
+              public static string GetTarget(string filename) {
+                  object shellLink = new ShellLink();
+                  try {
+                      ((IPersistFile)shellLink).Load(filename, 0);
+                      var path = new StringBuilder(32768);
+                      int result = ((IShellLinkW)shellLink).GetPath(path, path.Capacity, IntPtr.Zero, 4);
+                      if (result < 0) Marshal.ThrowExceptionForHR(result);
+                      return path.ToString();
+                  } finally {
+                      Marshal.FinalReleaseComObject(shellLink);
+                  }
+              }
               [DllImport("shell32.dll", EntryPoint = "ExtractIconExW", CharSet = CharSet.Unicode, ExactSpelling = true)]
               public static extern uint ExtractIcon(string path, int index, [Out] IntPtr[] large, [Out] IntPtr[] small, uint count);
               [DllImport("user32.dll")]
               public static extern bool DestroyIcon(IntPtr icon);
           }
           '@
+          $targetPath = [FytoVerifyShell]::GetTarget($shortcut)
+          if ($targetPath -ine $viewer.FullName) {
+            Write-Output "FYTO_START_LINK_BYTES $([Convert]::ToBase64String($bytes))"
+            throw "Start menu target is [$targetPath], WScript ASCII copy target is [$($link.TargetPath)], expected [$($viewer.FullName)]"
+          }
+          if ($link.IconLocation -and $link.IconLocation -ne ',0' -and $link.IconLocation -ine ($viewer.FullName + ',0')) {
+            throw "Start menu shortcut uses an unexpected icon source $($link.IconLocation)"
+          }
           $large = [IntPtr[]]::new(1)
           $small = [IntPtr[]]::new(1)
-          $count = [FytoVerifyShell]::ExtractIcon($link.TargetPath, 0, $large, $small, 1)
+          $count = [FytoVerifyShell]::ExtractIcon($targetPath, 0, $large, $small, 1)
           if ($count -eq 0 -or $large[0] -eq [IntPtr]::Zero -or $small[0] -eq [IntPtr]::Zero) {
             throw 'The Start menu shortcut target did not expose the embedded icon'
           }
