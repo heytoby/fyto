@@ -1,5 +1,5 @@
 ﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="fyto 中文版" Manufacturer="fyto Community" Version="1.0.45" UpgradeCode="A9C96FF0-C5C9-41CD-BF19-E0E825F7E76B" Language="2052" Codepage="936" Scope="perMachine" InstallerVersion="500">
+  <Package Name="fyto 中文版" Manufacturer="fyto Community" Version="1.0.46" UpgradeCode="A9C96FF0-C5C9-41CD-BF19-E0E825F7E76B" Language="2052" Codepage="936" Scope="perMachine" InstallerVersion="500">
     <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="已安装较新版本。" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
     <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" />

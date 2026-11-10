@@ -6,7 +6,7 @@ static fyto_hover_fade_t fyto_hover_fade;
 static BOOL fyto_visible_image_rect(RECT *result)
 {
     RECT viewport,image;int w,h,rw,rh,rx,ry;
-    if(!_viv_frame_count || !_viv_dst_zoom_values)return FALSE;
+    if((!_viv_frame_count && !_viv_preview.hbitmap) || !_viv_dst_zoom_values)return FALSE;
     _viv_viewport_rect(&viewport);w=viewport.right-viewport.left;h=viewport.bottom-viewport.top;
     _viv_get_render_size(&rw,&rh);
     rw=(int)(rw*_viv_dst_zoom_values[_viv_dst_zoom_x_pos]);
@@ -71,7 +71,7 @@ static BOOL fyto_hover_input(HWND hwnd,UINT message,WPARAM buttons,LPARAM positi
 {
     POINT point;
     if(message==WM_TIMER && buttons==FYTO_HOVER_FADE_TIMER){
-        if(!_viv_frame_count || _viv_in_sizemove)fyto_hover_target(hwnd,0);
+        if((!_viv_frame_count && !_viv_preview.hbitmap) || _viv_in_sizemove)fyto_hover_target(hwnd,0);
         fyto_hover_invalidate(hwnd);
         if(fyto_hover_fade_alpha(&fyto_hover_fade,GetTickCount())==fyto_hover_fade.to)
             KillTimer(hwnd,FYTO_HOVER_FADE_TIMER);
@@ -109,7 +109,7 @@ static void fyto_paint_image_hover(HDC dc)
     fyto_hover_target(_viv_hwnd,visible && fyto_hover_contains(&image,&layout.pin,point));
     alpha=fyto_hover_fade_alpha(&fyto_hover_fade,GetTickCount());
     if(!alpha && !fyto_image_hover)return;
-    fyto_draw_hover(dc,&image,&canvas,_viv_current_fd?string_get_filename_part(_viv_current_fd->cFileName):L"",
+    fyto_draw_hover(dc,&image,&canvas,string_get_filename_part(_viv_presented_path()),
         _viv_image_wide,_viv_image_high,!config_show_caption,_viv_is_slideshow,alpha,fyto_image_hover,os_logical_wide,os_logical_high);
     if(!config_show_caption && fyto_image_hover)
         fyto_draw_pin(dc,&layout.pin,config_ontop==1,1,os_logical_high);
