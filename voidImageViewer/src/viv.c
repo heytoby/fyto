@@ -14378,6 +14378,34 @@ static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int
     return hbitmap;
 }
 
+static int _viv_directory_compare_names(const void *a, const void *b)
+{
+    return _viv_fd_compare_name((const WIN32_FIND_DATA *)a, (const WIN32_FIND_DATA *)b);
+}
+
+static const WIN32_FIND_DATA *_viv_directory_next_by_name(const _viv_directory_t *directory,
+    const WIN32_FIND_DATA *current, int prev, BOOL wrap)
+{
+    size_t first = 0, last = directory->count;
+    BOOL backwards = (prev != 0) == (config_nav_sort_ascending != 0);
+    if (!directory->count) return NULL;
+
+    while (first < last)
+    {
+        size_t middle = first + (last - first) / 2;
+        int order = _viv_fd_compare_name(&directory->files[middle], current);
+        if (order < 0 || (!backwards && order == 0)) first = middle + 1;
+        else last = middle;
+    }
+    if (backwards)
+    {
+        if (first) return &directory->files[first - 1];
+        return wrap ? &directory->files[directory->count - 1] : NULL;
+    }
+    if (first < directory->count) return &directory->files[first];
+    return wrap ? &directory->files[0] : NULL;
+}
+
 static BOOL _viv_cached_directory_next(const WIN32_FIND_DATA *current, int prev, BOOL wrap, WIN32_FIND_DATA *next)
 {
     _viv_directory_t *directory = _viv_directory_cache;
@@ -14400,17 +14428,30 @@ static BOOL _viv_cached_directory_next(const WIN32_FIND_DATA *current, int prev,
     leaf = *current;
     string_copy(leaf.cFileName, string_get_filename_part(current->cFileName));
     leaf.dwReserved0 = leaf.dwReserved1 = 0;
-    for (i = 0; i < directory->count; ++i)
+    if (config_nav_sort == CONFIG_NAV_SORT_NAME || config_nav_sort == CONFIG_NAV_SORT_FULL_PATH_AND_FILENAME)
+        best = _viv_directory_next_by_name(directory, &leaf, prev, wrap);
+    else
     {
-        const WIN32_FIND_DATA *file = &directory->files[i];
-        if (string_compare(file->cFileName, leaf.cFileName) == 0) continue;
-        if (_viv_fd_compare(file, &leaf) * direction > 0 &&
-            (!best || _viv_fd_compare(file, best) * direction < 0)) best = file;
-        if (wrap && (!first || _viv_fd_compare(file, first) * direction < 0)) first = file;
+        for (i = 0; i < directory->count; ++i)
+        {
+            const WIN32_FIND_DATA *file = &directory->files[i];
+            if (string_compare(file->cFileName, leaf.cFileName) == 0) continue;
+            if (_viv_fd_compare(file, &leaf) * direction > 0 &&
+                (!best || _viv_fd_compare(file, best) * direction < 0)) best = file;
+        }
+        if (!best && wrap)
+        {
+            for (i = 0; i < directory->count; ++i)
+            {
+                const WIN32_FIND_DATA *file = &directory->files[i];
+                if (string_compare(file->cFileName, leaf.cFileName) != 0 &&
+                    (!first || _viv_fd_compare(file, first) * direction < 0)) first = file;
+            }
+            best = first;
+        }
     }
-    if (!best) best = first;
     next->cFileName[0] = 0;
-    if (best)
+    if (best && string_compare(best->cFileName, leaf.cFileName) != 0)
     {
         *next = *best;
         string_path_combine(path, folder, best->cFileName);
@@ -14471,6 +14512,8 @@ static DWORD WINAPI _viv_scan_directory(void *arg)
         scan->files = NULL;
         scan->count = 0;
     }
+    if (scan->ready && scan->count > 1)
+        qsort(scan->files, scan->count, sizeof(*scan->files), _viv_directory_compare_names);
     PostMessageW(scan->hwnd, FYTO_DIRECTORY_READY, 0, 0);
     return 0;
 }
