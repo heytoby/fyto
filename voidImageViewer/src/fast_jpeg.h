@@ -11,13 +11,13 @@
 #endif
 #include <wincodec.h>
 
-typedef struct fyto_jpeg {
+typedef struct fyto_wic_image {
     IWICImagingFactory *factory;
     IWICBitmapDecoder *decoder;
     IWICBitmapFrameDecode *frame;
     IWICColorContext *profile, *srgb;
     UINT wide, high;
-} fyto_jpeg;
+} fyto_wic_image;
 
 static HBITMAP fyto_image_dib(UINT wide, UINT high, UINT bit_count, BYTE **pixels)
 {
@@ -35,7 +35,7 @@ static HBITMAP fyto_image_dib(UINT wide, UINT high, UINT bit_count, BYTE **pixel
     return CreateDIBSection(NULL, &info, DIB_RGB_COLORS, (void **)(pixels ? pixels : &unused), NULL, 0);
 }
 
-static void fyto_jpeg_close(fyto_jpeg *jpeg)
+static void fyto_wic_close(fyto_wic_image *jpeg)
 {
     if (jpeg->srgb) IWICColorContext_Release(jpeg->srgb);
     if (jpeg->profile) IWICColorContext_Release(jpeg->profile);
@@ -44,7 +44,7 @@ static void fyto_jpeg_close(fyto_jpeg *jpeg)
     if (jpeg->factory) IWICImagingFactory_Release(jpeg->factory);
 }
 
-static BOOL fyto_jpeg_set_color(fyto_jpeg *jpeg)
+static BOOL fyto_wic_set_color(fyto_wic_image *jpeg)
 {
     UINT count = 0;
     if (FAILED(IWICBitmapFrameDecode_GetColorContexts(jpeg->frame, 0, NULL, &count))) return FALSE;
@@ -57,24 +57,29 @@ static BOOL fyto_jpeg_set_color(fyto_jpeg *jpeg)
         SUCCEEDED(IWICColorContext_InitializeFromExifColorSpace(jpeg->srgb, 1));
 }
 
-static BOOL fyto_jpeg_open(fyto_jpeg *jpeg, IStream *stream, BOOL use_icm)
+static BOOL fyto_wic_open(fyto_wic_image *image, const CLSID *codec, IStream *stream, WICPixelFormatGUID *format)
+{
+    return SUCCEEDED(CoCreateInstance(codec, NULL, CLSCTX_INPROC_SERVER,
+                                     &IID_IWICBitmapDecoder, (void **)&image->decoder)) &&
+        SUCCEEDED(IWICBitmapDecoder_Initialize(image->decoder, stream, WICDecodeMetadataCacheOnDemand)) &&
+        SUCCEEDED(IWICBitmapDecoder_GetFrame(image->decoder, 0, &image->frame)) &&
+        SUCCEEDED(IWICBitmapFrameDecode_GetSize(image->frame, &image->wide, &image->high)) &&
+        SUCCEEDED(IWICBitmapFrameDecode_GetPixelFormat(image->frame, format)) &&
+        SUCCEEDED(CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+                                   &IID_IWICImagingFactory, (void **)&image->factory));
+}
+
+static BOOL fyto_jpeg_open(fyto_wic_image *jpeg, IStream *stream, BOOL use_icm)
 {
     WICPixelFormatGUID format;
-    return SUCCEEDED(CoCreateInstance(&CLSID_WICJpegDecoder, NULL, CLSCTX_INPROC_SERVER,
-                                     &IID_IWICBitmapDecoder, (void **)&jpeg->decoder)) &&
-        SUCCEEDED(IWICBitmapDecoder_Initialize(jpeg->decoder, stream, WICDecodeMetadataCacheOnDemand)) &&
-        SUCCEEDED(IWICBitmapDecoder_GetFrame(jpeg->decoder, 0, &jpeg->frame)) &&
-        SUCCEEDED(IWICBitmapFrameDecode_GetSize(jpeg->frame, &jpeg->wide, &jpeg->high)) &&
-        SUCCEEDED(IWICBitmapFrameDecode_GetPixelFormat(jpeg->frame, &format)) &&
+    return fyto_wic_open(jpeg, &CLSID_WICJpegDecoder, stream, &format) &&
         (IsEqualGUID(&format, &GUID_WICPixelFormat24bppBGR) ||
          IsEqualGUID(&format, &GUID_WICPixelFormat32bppBGR) ||
          IsEqualGUID(&format, &GUID_WICPixelFormat8bppGray)) &&
-        SUCCEEDED(CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
-                                   &IID_IWICImagingFactory, (void **)&jpeg->factory)) &&
-        (!use_icm || fyto_jpeg_set_color(jpeg));
+        (!use_icm || fyto_wic_set_color(jpeg));
 }
 
-static int fyto_jpeg_orientation(const fyto_jpeg *jpeg)
+static int fyto_jpeg_orientation(const fyto_wic_image *jpeg)
 {
     IWICMetadataQueryReader *reader;
     PROPVARIANT value;
@@ -98,11 +103,11 @@ static int fyto_jpeg_orientation(const fyto_jpeg *jpeg)
     return orientation;
 }
 
-static BOOL fyto_jpeg_color_transform(const fyto_jpeg *jpeg, IWICBitmapSource *source, IWICColorTransform **transform)
+static BOOL fyto_wic_color_transform(const fyto_wic_image *jpeg, IWICBitmapSource *source, const WICPixelFormatGUID *format, IWICColorTransform **transform)
 {
     return SUCCEEDED(IWICImagingFactory_CreateColorTransformer(jpeg->factory, transform)) &&
         SUCCEEDED(IWICColorTransform_Initialize(*transform, source, jpeg->profile, jpeg->srgb,
-                                                &GUID_WICPixelFormat24bppBGR));
+                                                format));
 }
 
 static WICBitmapTransformOptions fyto_wic_orientation(int orientation)
@@ -120,7 +125,7 @@ static WICBitmapTransformOptions fyto_wic_orientation(int orientation)
     }
 }
 
-static HBITMAP fyto_jpeg_full(const fyto_jpeg *jpeg, int orientation, UINT *wide, UINT *high)
+static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT *wide, UINT *high)
 {
     IWICFormatConverter *converter = NULL;
     IWICColorTransform *color = NULL;
@@ -133,7 +138,7 @@ static HBITMAP fyto_jpeg_full(const fyto_jpeg *jpeg, int orientation, UINT *wide
     source = (IWICBitmapSource *)jpeg->frame;
     if (jpeg->profile)
     {
-        if (!fyto_jpeg_color_transform(jpeg, source, &color)) goto done;
+        if (!fyto_wic_color_transform(jpeg, source, &GUID_WICPixelFormat24bppBGR, &color)) goto done;
         source = (IWICBitmapSource *)color;
     }
     if (FAILED(IWICImagingFactory_CreateFormatConverter(jpeg->factory, &converter))) goto done;
@@ -161,7 +166,7 @@ done:
     return bitmap;
 }
 
-static HBITMAP fyto_jpeg_color_preview(const fyto_jpeg *jpeg, BYTE *pixels, UINT wide, UINT high, UINT stride)
+static HBITMAP fyto_jpeg_color_preview(const fyto_wic_image *jpeg, BYTE *pixels, UINT wide, UINT high, UINT stride)
 {
     IWICBitmap *source = NULL;
     IWICColorTransform *color = NULL;
@@ -169,7 +174,7 @@ static HBITMAP fyto_jpeg_color_preview(const fyto_jpeg *jpeg, BYTE *pixels, UINT
     BYTE *converted;
     if (SUCCEEDED(IWICImagingFactory_CreateBitmapFromMemory(jpeg->factory, wide, high,
         &GUID_WICPixelFormat24bppBGR, stride, stride * high, pixels, &source)) &&
-        fyto_jpeg_color_transform(jpeg, (IWICBitmapSource *)source, &color))
+        fyto_wic_color_transform(jpeg, (IWICBitmapSource *)source, &GUID_WICPixelFormat24bppBGR, &color))
     {
         bitmap = fyto_image_dib(wide, high, 24, &converted);
         if (bitmap && FAILED(IWICColorTransform_CopyPixels(color, NULL, stride, stride * high, converted)))
@@ -183,7 +188,7 @@ static HBITMAP fyto_jpeg_color_preview(const fyto_jpeg *jpeg, BYTE *pixels, UINT
     return bitmap;
 }
 
-static HBITMAP fyto_jpeg_preview(const fyto_jpeg *jpeg, UINT edge, UINT *wide, UINT *high)
+static HBITMAP fyto_jpeg_preview(const fyto_wic_image *jpeg, UINT edge, UINT *wide, UINT *high)
 {
     IWICBitmapSourceTransform *transform;
     WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;

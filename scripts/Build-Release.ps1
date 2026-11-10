@@ -32,6 +32,7 @@ Copy-Item (Join-Path $root 'voidImageViewer/vs2019/x64/Release/fyto.exe') $paylo
 Copy-Item (Join-Path $root 'LICENSE') $payload
 Copy-Item (Join-Path $root 'voidImageViewer/libwebp/COPYING') (Join-Path $payload 'libwebp-COPYING')
 Copy-Item (Join-Path $root 'voidImageViewer/libwebp/PATENTS') (Join-Path $payload 'libwebp-PATENTS')
+Copy-Item (Join-Path $root 'voidImageViewer/wuffs/LICENSE') (Join-Path $payload 'wuffs-LICENSE')
 Copy-Item (Join-Path $root 'THIRD_PARTY_NOTICES.md') (Join-Path $payload 'NOTICE.txt')
 Copy-Item (Join-Path $root 'README.md') (Join-Path $payload 'README.txt')
 if($WixDll -and $UiExtension){

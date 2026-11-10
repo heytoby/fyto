@@ -709,7 +709,7 @@
       <OmitFramePointers>false</OmitFramePointers>
       <WholeProgramOptimization>false</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\libwebp;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;BZ_NO_STDIO;VERSION_X64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;BZ_NO_STDIO;VERSION_X64;FYTO_HAVE_AVX_PNG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FloatingPointModel>Fast</FloatingPointModel>
@@ -1632,6 +1632,10 @@
     <ClCompile Include="..\src\string.c" />
     <ClCompile Include="..\src\utf8.c" />
     <ClCompile Include="..\src\viv.c" />
+    <ClCompile Include="..\src\png_decode_avx.c" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+      <AdditionalOptions>/arch:AVX %(AdditionalOptions)</AdditionalOptions>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
     <ClCompile Include="..\src\wchar.c" />
     <ClCompile Include="..\src\webp.c" />
   </ItemGroup>
