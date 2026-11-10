@@ -1,0 +1,120 @@
+name: Verify fyto Windows upgrade and installer
+on:
+  push:
+    branches: ['verify/fyto-1.0.0.44']
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyto-Windows-x64
+          run-id: 42789570651
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/fyto-verify
+
+      - name: Scan the built MSI and EXE with Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $folder = Join-Path $env:RUNNER_TEMP 'fyto-verify'
+          $platform = Join-Path $env:ProgramData 'Microsoft\Windows Defender\Platform'
+          $scanner = Get-ChildItem -Path "$platform\*\MpCmdRun.exe" -File | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$scanner) {
+            $scanner = Get-Item -LiteralPath (Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe')
+          }
+          foreach ($extension in @('msi', 'exe')) {
+            $package = Get-Item -LiteralPath (Join-Path $folder "fyto-Setup-1.0.0.44.$extension")
+            $scan = & $scanner.FullName -Scan -ScanType 3 -File $package.FullName -DisableRemediation 2>&1
+            $scan | Write-Output
+            if ($LASTEXITCODE -ne 0 -or ($scan -join ' ') -notmatch 'found no threats') {
+              throw "Defender did not return a clean scan for $($package.Name)"
+            }
+            $sha = (Get-FileHash -LiteralPath $package.FullName).Hash.ToLowerInvariant()
+            Write-Output "FYTO_DEFENDER_SCAN $($package.Name) $sha clean"
+          }
+
+      - name: Verify the Start menu icon after upgrading from 1.0.0.43
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $folder = Join-Path $env:RUNNER_TEMP 'fyto-verify'
+          $old = Join-Path $env:RUNNER_TEMP 'fyto-Setup-1.0.0.43.msi'
+          $new = Join-Path $folder 'fyto-Setup-1.0.0.44.msi'
+          $target = Join-Path $env:RUNNER_TEMP 'fyto prior installation'
+          Invoke-WebRequest -Uri 'https://github.com/heytoby/fyto/releases/download/v1.0.0.43/fyto-Setup-1.0.0.43.msi' -OutFile $old
+          if ((Get-FileHash -LiteralPath $old).Hash -ine '8949797617313133969ab2f3992caf60321caa4e68dfba085d3852570383cdec') {
+            throw 'Published 1.0.0.43 MSI hash changed'
+          }
+          $msiexec = Join-Path $env:WINDIR 'System32\msiexec.exe'
+          function Install-Fyto([string]$package, [string]$logName, [string]$directory) {
+            $log = Join-Path $env:RUNNER_TEMP $logName
+            $arguments = '/i "{0}" /quiet /norestart /l*v "{1}"' -f $package, $log
+            if ($directory) {
+              $arguments += ' INSTALLFOLDER="{0}"' -f $directory
+            }
+            $process = Start-Process $msiexec -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 50 }
+              throw "MSI returned $($process.ExitCode)"
+            }
+          }
+          Install-Fyto $old 'fyto-43-install.log' $target
+          $viewerPath = Join-Path $target 'fyto.exe'
+          if ((Get-Item -LiteralPath $viewerPath).VersionInfo.FileVersion -ne '1.0.0.43') {
+            throw 'Expected 1.0.0.43 at the chosen install location'
+          }
+          $shortcutName = 'fyto ' + [char]0x4e2d + [char]0x6587 + [char]0x7248 + '.lnk'
+          $shortcut = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) $shortcutName
+          $oldShortcutHash = (Get-FileHash -LiteralPath $shortcut).Hash
+          $ini = Join-Path $target 'fyto.ini'
+          Set-Content -LiteralPath $ini -Value @('[fyto]', 'fontsize=29')
+          $settingsHash = (Get-FileHash -LiteralPath $ini).Hash
+
+          Install-Fyto $new 'fyto-44-upgrade.log'
+          $viewer = Get-Item -LiteralPath $viewerPath
+          if ($viewer.VersionInfo.FileVersion -ne '1.0.0.44') {
+            throw '1.0.0.44 was not installed over 1.0.0.43'
+          }
+          if ((Get-FileHash -LiteralPath $ini).Hash -ne $settingsHash) {
+            throw 'Upgrade changed the existing settings'
+          }
+          if ((Get-FileHash -LiteralPath $shortcut).Hash -eq $oldShortcutHash) {
+            throw 'Upgrade kept the old Start menu shortcut'
+          }
+
+          $shell = New-Object -ComObject WScript.Shell
+          $link = $shell.CreateShortcut($shortcut)
+          if ($link.TargetPath -ine $viewer.FullName) {
+            throw "Start menu shortcut resolved to $($link.TargetPath)"
+          }
+          if ($link.IconLocation -and $link.IconLocation -ne ',0' -and $link.IconLocation -ine ($viewer.FullName + ',0')) {
+            throw "Start menu shortcut uses an unexpected icon source $($link.IconLocation)"
+          }
+
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class FytoVerifyShell {
+              [DllImport("shell32.dll", EntryPoint = "ExtractIconExW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+              public static extern uint ExtractIcon(string path, int index, [Out] IntPtr[] large, [Out] IntPtr[] small, uint count);
+              [DllImport("user32.dll")]
+              public static extern bool DestroyIcon(IntPtr icon);
+          }
+          '@
+          $large = [IntPtr[]]::new(1)
+          $small = [IntPtr[]]::new(1)
+          $count = [FytoVerifyShell]::ExtractIcon($link.TargetPath, 0, $large, $small, 1)
+          if ($count -eq 0 -or $large[0] -eq [IntPtr]::Zero -or $small[0] -eq [IntPtr]::Zero) {
+            throw 'The Start menu shortcut target did not expose the embedded icon'
+          }
+          [void][FytoVerifyShell]::DestroyIcon($large[0])
+          [void][FytoVerifyShell]::DestroyIcon($small[0])
+          $hash = (Get-FileHash -LiteralPath $new).Hash.ToLowerInvariant()
+          Write-Output "FYTO_START_ICON_43_TO_44 $hash verified"
