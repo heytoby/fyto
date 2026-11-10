@@ -1,0 +1,41 @@
+name: Prepare fyto 1.0.0.45 source
+on:
+  push:
+    branches: ['prepare/fyto-1.0.0.45']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Reproduce and check the source patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $archive=Join-Path $env:RUNNER_TEMP 'fyto44.zip'
+          git archive --format=zip -o $archive 7791962b21d9cc1b3bcef2339bd26c45347dfdf8
+          if($LASTEXITCODE -ne 0){throw 'Could not archive the base revision'}
+          $original=Join-Path $env:RUNNER_TEMP 'fyto44'
+          $candidate=Join-Path $env:RUNNER_TEMP 'fyto45'
+          Expand-Archive -LiteralPath $archive -DestinationPath $original
+          Expand-Archive -LiteralPath $archive -DestinationPath $candidate
+          $patches=(Resolve-Path '.github/fyto-prepare').Path
+          Copy-Item -LiteralPath (Join-Path $patches 'fast_png.h') -Destination (Join-Path $candidate 'voidImageViewer/src/fast_png.h')
+          $vendor=Join-Path $candidate 'voidImageViewer/wuffs'
+          New-Item -ItemType Directory -Path $vendor | Out-Null
+          Copy-Item -LiteralPath (Join-Path $patches 'wuffs-v0.3.c'),(Join-Path $patches 'LICENSE') -Destination $vendor
+          foreach($part in @('png','worker','wuffs','directory','avx','invalidation')){
+            python (Join-Path $patches "apply-$part.py") $candidate $patches
+            if($LASTEXITCODE -ne 0){throw "Applying $part failed"}
+          }
+          & (Join-Path $candidate 'scripts/Set-Version.ps1') -Version '1.0.0.45'
+          Copy-Item -LiteralPath (Join-Path $patches 'RELEASE_NOTES.md') -Destination $candidate -Force
+          python (Join-Path $candidate 'tests/test_playback_contract.py')
+          if($LASTEXITCODE -ne 0){throw 'Playback contract failed'}
+          python (Join-Path $patches 'export-blobs.py') $original $candidate
+          if($LASTEXITCODE -ne 0){throw 'Source export failed'}
