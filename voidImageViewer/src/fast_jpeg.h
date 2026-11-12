@@ -196,7 +196,7 @@ static HBITMAP fyto_jpeg_preview(const fyto_wic_image *jpeg, UINT edge, UINT *wi
     BYTE *pixels;
     UINT stride, image_edge = max(jpeg->wide, jpeg->high);
 
-    if ((UINT64)jpeg->wide * jpeg->high < 8000000 || !image_edge ||
+    if (!image_edge ||
         FAILED(IWICBitmapFrameDecode_QueryInterface(jpeg->frame, &IID_IWICBitmapSourceTransform, (void **)&transform)))
         return NULL;
 
