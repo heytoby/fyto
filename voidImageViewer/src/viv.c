@@ -622,6 +622,7 @@ static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int
 static void _viv_preload_next(void);
 static void _viv_schedule_directory_scan(void);
 static void _viv_replay_directory_navigation(BOOL fresh);
+static void _viv_finish_directory_navigation(void);
 static HBITMAP _viv_make_half_bitmap(HBITMAP source, int wide, int high, int half_wide, int half_high, BOOL top_down);
 static void _viv_start_first_frame(void);
 static void _viv_activate_preload(void);
@@ -717,9 +718,11 @@ typedef struct _viv_directory_s
 
 static _viv_directory_t *_viv_directory_scan, *_viv_directory_cache;
 static BOOL _viv_directory_changed(const _viv_directory_t *directory);
-enum { FYTO_NAV_PREVIOUS = 1, FYTO_NAV_WRAP = 2 };
+enum { FYTO_NAV_PREVIOUS = 1, FYTO_NAV_WRAP = 2, FYTO_NAV_WHEEL = 4 };
 static BYTE _viv_directory_steps[128];
 static unsigned _viv_directory_step_count;
+static BYTE _viv_navigation_in_flight;
+static BOOL _viv_dispatching_navigation;
 static _viv_frame_t *_viv_frames = 0; // the frames that make up an image, could be more than one for animations.
 static VIV_UINT64 _viv_timer_tick = 0; // the current tick for the current frame.
 static BYTE _viv_is_animation_timer = 0; // animation timer started?
@@ -743,6 +746,7 @@ static int _viv_manual_long_edge;
 static void _viv_remember_manual_size(void);
 #define FYTO_REFIT_WINDOW (WM_APP+26)
 #define FYTO_DIRECTORY_READY (WM_APP+27)
+#define FYTO_NAVIGATION_CONTINUE (WM_APP+28)
 static BYTE _viv_fitting_window;
 static void _viv_fit_image_window(void);
 static void _viv_set_view_mode(BOOL standard);
@@ -1627,7 +1631,11 @@ static void _viv_open(WIN32_FIND_DATA *fd,int is_preload)
     if(is_preload && (_viv_load_image_thread || (_viv_load_image_next_fd && !_viv_load_image_next_is_preload)))return;
     if (!is_preload)
     {
-        if (!_viv_same_image(fd, &_viv_requested_fd)) _viv_directory_step_count = 0;
+        if (!_viv_dispatching_navigation && !_viv_same_image(fd, &_viv_requested_fd))
+        {
+            _viv_directory_step_count = 0;
+            _viv_navigation_in_flight = 0;
+        }
         os_copy_memory(&_viv_requested_fd, fd, sizeof(WIN32_FIND_DATA));
         if (_viv_load_image_next_fd)
         {
@@ -2896,6 +2904,9 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 	{
         case FYTO_REFIT_WINDOW:
             _viv_fit_image_window();return 0;
+        case FYTO_NAVIGATION_CONTINUE:
+            _viv_replay_directory_navigation(FALSE);
+            return 0;
         case FYTO_DIRECTORY_READY:
             if (_viv_directory_scan)
             {
@@ -3467,6 +3478,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 				
 				e = next_e;
 			}
+            _viv_finish_directory_navigation();
 			
 			break;
 		}
@@ -8377,6 +8389,8 @@ static const char *_viv_get_copydata_string(const char *p,const char *e,wchar_t 
 
 static void _viv_blank(void)
 {
+    _viv_directory_step_count = 0;
+    _viv_navigation_in_flight = 0;
 	_viv_clear();
 
 	if (_viv_random)
@@ -14935,50 +14949,106 @@ static void _viv_schedule_directory_scan(void)
     SetThreadPriority(scan->thread, THREAD_PRIORITY_BELOW_NORMAL);
 }
 
+static void _viv_finish_directory_navigation(void)
+{
+    if (!_viv_navigation_in_flight) return;
+    if (!_viv_same_image(_viv_frame_fd, &_viv_requested_fd) &&
+        (_viv_load_image_next_fd || (_viv_active_load && !_viv_load_image_terminate &&
+         _viv_same_image(_viv_load_fd, &_viv_requested_fd)))) return;
+
+    _viv_navigation_in_flight = 0;
+    if (_viv_directory_step_count) PostMessageW(_viv_hwnd, FYTO_NAVIGATION_CONTINUE, 0, 0);
+}
+
 static void _viv_replay_directory_navigation(BOOL fresh)
 {
-    WIN32_FIND_DATA current = *_viv_current_fd;
-    unsigned used, remaining;
-    BOOL moved = FALSE;
-
-    for (used = 0; used < _viv_directory_step_count; used++)
+    while (_viv_directory_step_count && !_viv_navigation_in_flight)
     {
         WIN32_FIND_DATA next;
-        BYTE step = _viv_directory_steps[used];
+        BYTE step = _viv_directory_steps[0];
         int prev = (step & FYTO_NAV_PREVIOUS) != 0;
-        if (!_viv_cached_directory_next(&current, prev, (step & FYTO_NAV_WRAP) != 0, &next, fresh)) break;
-        _viv_last_is_prev = prev;
-        if (*next.cFileName)
+        BOOL playlist = _viv_playlist_start != NULL;
+        if (!playlist && !_viv_cached_directory_next(_viv_current_fd, prev,
+            (step & FYTO_NAV_WRAP) != 0, &next, fresh))
         {
-            current = next;
-            moved = TRUE;
+            _viv_schedule_directory_scan();
+            return;
         }
+
+        --_viv_directory_step_count;
+        memmove(_viv_directory_steps, _viv_directory_steps + 1, _viv_directory_step_count);
+        _viv_last_is_prev = prev;
+        if (!playlist && !*next.cFileName) continue;
+
+        // Advance again only after this image's preview, full frame, or failure reaches the UI.
+        _viv_navigation_in_flight = step;
+        _viv_dispatching_navigation = TRUE;
+        if (playlist)
+        {
+            int wheel = _viv_wheel_navigation;
+            _viv_wheel_navigation = (step & FYTO_NAV_WHEEL) != 0;
+            _viv_next(prev, 1, 0, 0);
+            _viv_wheel_navigation = wheel;
+        }
+        else
+            _viv_open(&next, 0);
+        _viv_dispatching_navigation = FALSE;
+        _viv_finish_directory_navigation();
+        return;
     }
-    remaining = _viv_directory_step_count - used;
-    if (used)
+}
+
+static void _viv_reverse_wheel_navigation(int prev)
+{
+    BYTE pending = _viv_navigation_in_flight;
+    const wchar_t *shown = _viv_frame_fd->cFileName;
+    const wchar_t *target = _viv_current_fd->cFileName;
+    size_t directory_length;
+    if (!pending && _viv_directory_step_count) pending = _viv_directory_steps[0];
+    if (!(pending & FYTO_NAV_WHEEL) || ((pending & FYTO_NAV_PREVIOUS) != 0) == (prev != 0) ||
+        !*shown) return;
+
+    directory_length = string_get_filename_part(shown) - shown;
+    if (!_viv_playlist_start &&
+        (directory_length != (size_t)(string_get_filename_part(target) - target) ||
+         wcsncmp(shown, target, directory_length))) return;
+
+    _viv_directory_step_count = 0;
+    if (_viv_navigation_in_flight && !_viv_same_image(_viv_frame_fd, &_viv_requested_fd))
     {
-        memmove(_viv_directory_steps, _viv_directory_steps + used, remaining);
-        if (moved) _viv_open(&current, 0);
-        _viv_directory_step_count = remaining;
+        // The old selection never appeared. A reversal starts from the image the user sees.
+        _viv_cancel_load(FALSE);
+        if (_viv_load_image_next_fd)
+        {
+            mem_free(_viv_load_image_next_fd);
+            _viv_load_image_next_fd = NULL;
+        }
+        _viv_clear_preload();
+        _viv_load_is_preload = 0;
+        _viv_should_activate_preload_on_load = 0;
+        *_viv_current_fd = *_viv_frame_fd;
+        _viv_requested_fd = *_viv_frame_fd;
+        _viv_status_update();
     }
-    if (remaining) _viv_schedule_directory_scan();
+    _viv_navigation_in_flight = 0;
 }
 
 static void _viv_next_manual(int prev, int repeat)
 {
     if (_viv_load_is_preload || _viv_preview.hbitmap) repeat = 0;
-    if (_viv_playlist_start || _viv_random || !*_viv_current_fd->cFileName)
+    if (_viv_random || !*_viv_current_fd->cFileName)
     {
         _viv_next(prev, 1, 0, repeat);
         return;
     }
-    if (repeat && (_viv_directory_step_count ||
+    if (repeat && (_viv_directory_step_count || _viv_navigation_in_flight ||
         (_viv_load_image_thread && (_viv_load_frame_count <= 1 || _viv_load_image_terminate))))
         return;
 
-    if (_viv_directory_step_count == ARRAYSIZE(_viv_directory_steps)) _viv_directory_step_count--;
+    if (_viv_wheel_navigation) _viv_reverse_wheel_navigation(prev);
+    if (_viv_directory_step_count == ARRAYSIZE(_viv_directory_steps)) return;
     _viv_directory_steps[_viv_directory_step_count++] =
-        (prev ? FYTO_NAV_PREVIOUS : 0) | (_viv_wheel_navigation ? 0 : FYTO_NAV_WRAP);
+        (prev ? FYTO_NAV_PREVIOUS : 0) | (_viv_wheel_navigation ? FYTO_NAV_WHEEL : FYTO_NAV_WRAP);
     _viv_replay_directory_navigation(FALSE);
     if (_viv_is_slideshow)
     {
