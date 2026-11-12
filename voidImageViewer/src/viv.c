@@ -378,6 +378,7 @@ typedef struct _viv_frame_s
 	
 	// frame delay in milliseconds.
 	DWORD delay;
+    BOOL top_down;
 	
 }_viv_frame_t;
 
@@ -616,7 +617,7 @@ static void _viv_process_pending_clear(void);
 static void _viv_clear_loading_preload(void);
 static void _viv_clear_preload(void);
 static void _viv_clear_preload_frames(void);
-static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int render_wide,int render_high,int *pmip_wide,int *pmip_high,_viv_mipmap_t **out_mip);
+static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int render_wide,int render_high,int *pmip_wide,int *pmip_high,_viv_mipmap_t **out_mip, BOOL top_down);
 static void _viv_preload_next(void);
 static void _viv_schedule_directory_scan(void);
 static void _viv_start_first_frame(void);
@@ -704,6 +705,7 @@ typedef struct _viv_directory_s
     wchar_t folder[STRING_SIZE];
     WIN32_FIND_DATA *files;
     size_t count;
+    BYTE sort, ascending;
     volatile LONG cancelled;
     BOOL ready;
 } _viv_directory_t;
@@ -3270,9 +3272,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 
 									// allocate hbitmaps.
 									_viv_preload_frames = (_viv_frame_t *)mem_alloc(sizeof(_viv_frame_t) * _viv_preload_frame_count);
-									_viv_preload_frames[0].hbitmap = first_frame->frame.hbitmap;
-									_viv_preload_frames[0].mipmap = first_frame->frame.mipmap;
-									_viv_preload_frames[0].delay = first_frame->frame.delay;
+									_viv_preload_frames[0] = first_frame->frame;
 
 									first_frame->frame.hbitmap = 0;
 									first_frame->frame.mipmap = NULL;
@@ -3300,9 +3300,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 
 									// allocate hbitmaps.
 									_viv_frames = mem_alloc(sizeof(_viv_frame_t) * _viv_frame_count);
-									_viv_frames[0].hbitmap = first_frame->frame.hbitmap;
-									_viv_frames[0].mipmap = first_frame->frame.mipmap;
-									_viv_frames[0].delay = first_frame->frame.delay;
+									_viv_frames[0] = first_frame->frame;
 									os_copy_memory(_viv_frame_fd,_viv_load_fd,sizeof(WIN32_FIND_DATA));
 
 									first_frame->frame.hbitmap = 0;
@@ -3366,9 +3364,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 									// we could have been cleared.
 									if (_viv_preload_frames)
 									{
-										_viv_preload_frames[_viv_preload_frame_loaded_count].hbitmap = additional_frame->hbitmap;
-										_viv_preload_frames[_viv_preload_frame_loaded_count].mipmap = additional_frame->mipmap;
-										_viv_preload_frames[_viv_preload_frame_loaded_count].delay = additional_frame->delay;
+										_viv_preload_frames[_viv_preload_frame_loaded_count] = *additional_frame;
 										
 										_viv_preload_frame_loaded_count++;
 										
@@ -3385,9 +3381,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 										// incase we get an event from an old load.
 										if (_viv_frame_loaded_count < _viv_frame_count)
 										{
-											_viv_frames[_viv_frame_loaded_count].hbitmap = additional_frame->hbitmap;
-											_viv_frames[_viv_frame_loaded_count].mipmap = additional_frame->mipmap;
-											_viv_frames[_viv_frame_loaded_count].delay = additional_frame->delay;
+											_viv_frames[_viv_frame_loaded_count] = *additional_frame;
 											
 											_viv_frame_loaded_count++;
 											
@@ -4635,7 +4629,7 @@ debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
                                 mip_high = _viv_preview.high;
                             }
                             else
-                                mip_hbitmap = _viv_get_mipmap(_viv_frames[_viv_frame_position].hbitmap,_viv_image_wide,_viv_image_high,rw,rh,&mip_wide,&mip_high,&_viv_frames[_viv_frame_position].mipmap);
+                                mip_hbitmap = _viv_get_mipmap(_viv_frames[_viv_frame_position].hbitmap,_viv_image_wide,_viv_image_high,rw,rh,&mip_wide,&mip_high,&_viv_frames[_viv_frame_position].mipmap, _viv_frames[_viv_frame_position].top_down);
 							
 							if (mip_hbitmap)
 							{
@@ -6138,13 +6132,13 @@ static int _viv_fd_compare_path_and_name(const WIN32_FIND_DATA *a,const WIN32_FI
 	return _viv_compare_id(a,b);
 }
 
-static int _viv_fd_compare(const WIN32_FIND_DATA *a,const WIN32_FIND_DATA *b)
+static int _viv_fd_compare_order(const WIN32_FIND_DATA *a, const WIN32_FIND_DATA *b, BYTE sort, BYTE ascending)
 {
 	int ret;
 	
 	ret = 0;
 	
-	switch(config_nav_sort)
+	switch (sort)
 	{
 		case CONFIG_NAV_SORT_NAME:
 			ret = _viv_fd_compare_name(a,b);
@@ -6176,8 +6170,8 @@ static int _viv_fd_compare(const WIN32_FIND_DATA *a,const WIN32_FIND_DATA *b)
 			}
 			else
 			{
-				// we want name ascending when we are size descending.
-				ret = -_viv_fd_compare_name(a,b);
+				// Keep the name order stable when file sizes match.
+				return _viv_fd_compare_name(a,b);
 			}
 			
 			break;
@@ -6205,7 +6199,7 @@ static int _viv_fd_compare(const WIN32_FIND_DATA *a,const WIN32_FIND_DATA *b)
 			}
 			else
 			{
-				ret = -_viv_fd_compare_name(a,b);
+				return _viv_fd_compare_name(a,b);
 			}
 			
 			break;
@@ -6233,19 +6227,24 @@ static int _viv_fd_compare(const WIN32_FIND_DATA *a,const WIN32_FIND_DATA *b)
 			}
 			else
 			{
-				ret = -_viv_fd_compare_name(a,b);
+				return _viv_fd_compare_name(a,b);
 			}
 			
 			break;
 		}
 	}
 	
-	if (!config_nav_sort_ascending)
+	if (!ascending)
 	{
 		ret *= -1;
 	}
 	
 	return ret;
+}
+
+static int _viv_fd_compare(const WIN32_FIND_DATA *a,const WIN32_FIND_DATA *b)
+{
+    return _viv_fd_compare_order(a, b, config_nav_sort, config_nav_sort_ascending);
 }
 
 static int _viv_next(int prev,int reset_slideshow_timer,int is_preload,int wait_for_current_load)
@@ -6767,11 +6766,11 @@ static int _viv_is_msg(MSG *msg)
 					switch(HIWORD(msg->wParam))
 					{
 						case XBUTTON1:
-							_viv_next(1,1,0,0);
+							_viv_next_manual(1,0);
 							break;
 
 						case XBUTTON2:
-							_viv_next(0,1,0,0);
+							_viv_next_manual(0,0);
 							break;
 					}
 					
@@ -8138,6 +8137,7 @@ static void _viv_edit_rotate(int counterclockwise)
 						DeleteObject(_viv_frames[i].hbitmap);
 						
 						_viv_frames[i].hbitmap = new_hbitmap;
+                        _viv_frames[i].top_down = FALSE;
 					}
 					
 					// delete mipmaps
@@ -8638,8 +8638,8 @@ static INT_PTR CALLBACK _viv_options_controls_proc(HWND hwnd,UINT msg,WPARAM wPa
 			ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_RIGHTCLICKACTION),config_right_click_action);
 			
 			os_ComboBox_AddString(hwnd,IDC_MOUSEWHEELACTION,(const utf8_t *)l10n_text("Zoom"));
-			os_ComboBox_AddString(hwnd,IDC_MOUSEWHEELACTION,(const utf8_t *)l10n_text("Next/Prev"));
-			os_ComboBox_AddString(hwnd,IDC_MOUSEWHEELACTION,(const utf8_t *)l10n_text("Prev/Next"));
+			os_ComboBox_AddString(hwnd,IDC_MOUSEWHEELACTION,(const utf8_t *)l10n_text("Up: Previous, Down: Next"));
+			os_ComboBox_AddString(hwnd,IDC_MOUSEWHEELACTION,(const utf8_t *)l10n_text("Up: Next, Down: Previous"));
 			ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_MOUSEWHEELACTION),config_mouse_wheel_action);
 			os_ComboBox_AddString(hwnd,IDC_MIDDLECLICKACTION,l10n_text("Drag only"));
 			os_ComboBox_AddString(hwnd,IDC_MIDDLECLICKACTION,l10n_text("Toggle Fit / 100%"));
@@ -10538,6 +10538,7 @@ static int _viv_webp_frame_proc(_viv_webp_t *viv_webp,BYTE *pixels,int delay)
 				first_frame.wide = viv_webp->wide;
 				first_frame.high = viv_webp->high;
 				first_frame.frame.hbitmap = hbitmap;
+				first_frame.frame.top_down = FALSE;
 				first_frame.frame.mipmap = NULL;
 				first_frame.frame.delay = 0;
 				first_frame.frame_count = viv_webp->frame_count;
@@ -10548,13 +10549,13 @@ static int _viv_webp_frame_proc(_viv_webp_t *viv_webp,BYTE *pixels,int delay)
 				}
 
 				// preload first mipmap
-				_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,job->render_wide/2,job->render_high/2,&mip_wide,&mip_high,&first_frame.frame.mipmap);
+				_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,job->render_wide/2,job->render_high/2,&mip_wide,&mip_high,&first_frame.frame.mipmap, FALSE);
 
 				_viv_reply_add(job, _VIV_REPLY_LOAD_IMAGE_FIRST_FRAME,sizeof(_viv_reply_load_image_first_frame_t),&first_frame);
 			}
 			else
 			{
-				_viv_frame_t frame;
+				_viv_frame_t frame = {0};
 				
 				frame.hbitmap = hbitmap;
 				frame.mipmap = NULL;
@@ -10562,7 +10563,7 @@ static int _viv_webp_frame_proc(_viv_webp_t *viv_webp,BYTE *pixels,int delay)
 				
 //printf("DELAY %d\n",delay)				;
 
-				_viv_get_mipmap(hbitmap,viv_webp->wide,viv_webp->high,job->render_wide/2,job->render_high/2,&mip_wide,&mip_high,&frame.mipmap);
+				_viv_get_mipmap(hbitmap,viv_webp->wide,viv_webp->high,job->render_wide/2,job->render_high/2,&mip_wide,&mip_high,&frame.mipmap, FALSE);
 				
 				_viv_reply_add(job, _VIV_REPLY_LOAD_IMAGE_ADDITIONAL_FRAME,sizeof(_viv_frame_t),&frame);
 			}
@@ -10586,8 +10587,9 @@ static BOOL _viv_reply_still_frame(_viv_load_job_t *job, _viv_reply_load_image_f
     if (!_viv_load_discarded(job))
     {
         frame->frame_count = 1;
+        frame->frame.top_down = TRUE;
         _viv_get_mipmap(frame->frame.hbitmap, frame->wide, frame->high,
-            job->render_wide, job->render_high, &mip_wide, &mip_high, &frame->frame.mipmap);
+            job->render_wide, job->render_high, &mip_wide, &mip_high, &frame->frame.mipmap, TRUE);
         if (!_viv_load_discarded(job))
         {
             _viv_reply_add(job, _VIV_REPLY_LOAD_IMAGE_FIRST_FRAME, sizeof(*frame), frame);
@@ -10682,6 +10684,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 	first_frame.frame.hbitmap = 0;
 	first_frame.frame.mipmap = 0;
 	first_frame.frame.delay = 0;
+    first_frame.frame.top_down = FALSE;
 
 	ret = 0;
 	stream = NULL;
@@ -11023,7 +11026,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 												
 													if (i)
 													{
-														_viv_frame_t frame;
+														_viv_frame_t frame = {0};
 														int mip_wide;
 														int mip_high;
 
@@ -11036,7 +11039,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 															frame.delay = 100;
 														}
 														
-														_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,job->render_wide,job->render_high,&mip_wide,&mip_high,&frame.mipmap);
+														_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,job->render_wide,job->render_high,&mip_wide,&mip_high,&frame.mipmap, FALSE);
 
 														_viv_reply_add(job, _VIV_REPLY_LOAD_IMAGE_ADDITIONAL_FRAME,sizeof(_viv_frame_t),&frame);
 													}
@@ -11046,6 +11049,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 														int mip_high;
 
 														first_frame.frame.hbitmap = hbitmap;
+														first_frame.frame.top_down = FALSE;
 														first_frame.frame.mipmap = NULL;
 														first_frame.frame.delay = 0;
 														
@@ -11060,7 +11064,7 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 														}
 															
 														// preload first mipmap
-														_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,job->render_wide,job->render_high,&mip_wide,&mip_high,&first_frame.frame.mipmap);
+														_viv_get_mipmap(hbitmap,first_frame.wide,first_frame.high,job->render_wide,job->render_high,&mip_wide,&mip_high,&first_frame.frame.mipmap, FALSE);
 							
 														_viv_reply_add(job, _VIV_REPLY_LOAD_IMAGE_FIRST_FRAME,sizeof(_viv_reply_load_image_first_frame_t),&first_frame);
 
@@ -14318,7 +14322,18 @@ static void _viv_do_mousewheel_action(int action,int delta,int x,int y)
 			InvalidateRect(_viv_hwnd,0,FALSE);
 		}
 	}
- else if(action==1 || action==2){_viv_wheel_delta+=delta;while(_viv_wheel_delta>=WHEEL_DELTA || _viv_wheel_delta<=-WHEEL_DELTA){int positive=_viv_wheel_delta>0;_viv_wheel_delta+=positive?-WHEEL_DELTA:WHEEL_DELTA;_viv_wheel_navigation=1;_viv_next_manual(action==1?positive:!positive, 0);_viv_wheel_navigation=0;}}
+    else if (action == 1 || action == 2)
+    {
+        _viv_wheel_delta += delta;
+        while (_viv_wheel_delta >= WHEEL_DELTA || _viv_wheel_delta <= -WHEEL_DELTA)
+        {
+            BOOL up = _viv_wheel_delta > 0;
+            _viv_wheel_delta += up ? -WHEEL_DELTA : WHEEL_DELTA;
+            _viv_wheel_navigation = 1;
+            _viv_next_manual(action == 1 ? up : !up, 0);
+            _viv_wheel_navigation = 0;
+        }
+    }
 }
 
 void viv_migrate_default_keys(void)
@@ -14406,15 +14421,17 @@ static __m128i _viv_sum_pixel_pairs(__m128i top, __m128i bottom)
 }
 #endif
 
-static HBITMAP _viv_half_dib(HBITMAP source, int wide, int high, int half_wide, int half_high)
+static HBITMAP _viv_half_dib(HBITMAP source, int wide, int high, int half_wide, int half_high, BOOL top_down)
 {
     DIBSECTION dib;
     HBITMAP bitmap;
     BYTE *pixels;
     int y;
+    /* GetObject can report a positive height for a top-down DIB. */
     if (GetObject(source, sizeof(dib), &dib) != sizeof(dib) ||
         dib.dsBm.bmBitsPixel != 32 || !dib.dsBm.bmBits ||
-        dib.dsBm.bmWidth != wide || dib.dsBmih.biHeight != -high ||
+        dib.dsBm.bmWidth != wide || dib.dsBm.bmHeight != high ||
+        (!top_down && dib.dsBmih.biHeight != -high) ||
         dib.dsBmih.biCompression != BI_RGB) return NULL;
     bitmap = fyto_image_dib(half_wide, half_high, 32, &pixels);
     if (!bitmap) return NULL;
@@ -14447,9 +14464,9 @@ static HBITMAP _viv_half_dib(HBITMAP source, int wide, int high, int half_wide, 
     return bitmap;
 }
 
-static HBITMAP _viv_make_half_bitmap(HBITMAP source, int wide, int high, int half_wide, int half_high)
+static HBITMAP _viv_make_half_bitmap(HBITMAP source, int wide, int high, int half_wide, int half_high, BOOL top_down)
 {
-    HBITMAP bitmap = _viv_half_dib(source, wide, high, half_wide, half_high);
+    HBITMAP bitmap = _viv_half_dib(source, wide, high, half_wide, half_high, top_down);
     HDC screen, src, dest;
     HGDIOBJ previous_src = NULL, previous_dest = NULL;
     BOOL copied = FALSE;
@@ -14482,7 +14499,7 @@ static HBITMAP _viv_make_half_bitmap(HBITMAP source, int wide, int high, int hal
     return bitmap;
 }
 
-static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int render_wide,int render_high,int *pmip_wide,int *pmip_high,_viv_mipmap_t **out_mip)
+static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int render_wide,int render_high,int *pmip_wide,int *pmip_high,_viv_mipmap_t **out_mip, BOOL top_down)
 {
     while (image_wide > 1 || image_high > 1)
     {
@@ -14491,13 +14508,14 @@ static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int
         if (wide < render_wide || high < render_high) break;
         if (!*out_mip)
         {
-            HBITMAP reduced = _viv_make_half_bitmap(hbitmap, image_wide, image_high, wide, high);
+            HBITMAP reduced = _viv_make_half_bitmap(hbitmap, image_wide, image_high, wide, high, top_down);
             if (!reduced) break;
             *out_mip = mem_alloc(sizeof(_viv_mipmap_t));
             (*out_mip)->hbitmap = reduced;
             (*out_mip)->mipmap = NULL;
         }
         hbitmap = (*out_mip)->hbitmap;
+        top_down = TRUE;
         image_wide = wide;
         image_high = high;
         out_mip = &(*out_mip)->mipmap;
@@ -14508,22 +14526,31 @@ static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int
     return hbitmap;
 }
 
+#ifdef _MSC_VER
+static int __cdecl _viv_directory_compare(void *context, const void *a, const void *b)
+{
+    const _viv_directory_t *directory = context;
+    return _viv_fd_compare_order(a, b, directory->sort, directory->ascending);
+}
+#else
 static int _viv_directory_compare_names(const void *a, const void *b)
 {
-    return _viv_fd_compare_name((const WIN32_FIND_DATA *)a, (const WIN32_FIND_DATA *)b);
+    return _viv_fd_compare_name(a, b);
 }
+#endif
 
-static const WIN32_FIND_DATA *_viv_directory_next_by_name(const _viv_directory_t *directory,
+static const WIN32_FIND_DATA *_viv_directory_next_sorted(const _viv_directory_t *directory,
     const WIN32_FIND_DATA *current, int prev, BOOL wrap)
 {
     size_t first = 0, last = directory->count;
-    BOOL backwards = (prev != 0) == (config_nav_sort_ascending != 0);
+    BOOL backwards = prev != 0;
     if (!directory->count) return NULL;
 
     while (first < last)
     {
         size_t middle = first + (last - first) / 2;
-        int order = _viv_fd_compare_name(&directory->files[middle], current);
+        int order = _viv_fd_compare_order(&directory->files[middle], current,
+            directory->sort, directory->ascending);
         if (order < 0 || (!backwards && order == 0)) first = middle + 1;
         else last = middle;
     }
@@ -14558,10 +14585,17 @@ static BOOL _viv_cached_directory_next(const WIN32_FIND_DATA *current, int prev,
     leaf = *current;
     string_copy(leaf.cFileName, string_get_filename_part(current->cFileName));
     leaf.dwReserved0 = leaf.dwReserved1 = 0;
-    if (config_nav_sort == CONFIG_NAV_SORT_NAME || config_nav_sort == CONFIG_NAV_SORT_FULL_PATH_AND_FILENAME)
-        best = _viv_directory_next_by_name(directory, &leaf, prev, wrap);
+    if (directory->sort == config_nav_sort && directory->ascending == config_nav_sort_ascending)
+        best = _viv_directory_next_sorted(directory, &leaf, prev, wrap);
+    else if ((directory->sort == CONFIG_NAV_SORT_NAME || directory->sort == CONFIG_NAV_SORT_FULL_PATH_AND_FILENAME) &&
+             (config_nav_sort == CONFIG_NAV_SORT_NAME || config_nav_sort == CONFIG_NAV_SORT_FULL_PATH_AND_FILENAME))
+        best = _viv_directory_next_sorted(directory, &leaf,
+            (prev != 0) != (directory->ascending != config_nav_sort_ascending), wrap);
     else
     {
+#ifdef _MSC_VER
+        _viv_schedule_directory_scan();
+#endif
         for (i = 0; i < directory->count; ++i)
         {
             const WIN32_FIND_DATA *file = &directory->files[i];
@@ -14640,7 +14674,13 @@ static DWORD WINAPI _viv_scan_directory(void *arg)
         scan->count = 0;
     }
     if (scan->ready && scan->count > 1)
+    {
+#ifdef _MSC_VER
+        qsort_s(scan->files, scan->count, sizeof(*scan->files), _viv_directory_compare, scan);
+#else
         qsort(scan->files, scan->count, sizeof(*scan->files), _viv_directory_compare_names);
+#endif
+    }
     PostMessageW(scan->hwnd, FYTO_DIRECTORY_READY, 0, 0);
     return 0;
 }
@@ -14649,6 +14689,11 @@ static void _viv_schedule_directory_scan(void)
 {
     wchar_t folder[STRING_SIZE];
     _viv_directory_t *scan;
+#ifdef _MSC_VER
+    BYTE sort = config_nav_sort, ascending = config_nav_sort_ascending;
+#else
+    BYTE sort = CONFIG_NAV_SORT_NAME, ascending = TRUE;
+#endif
     if (!config_preload_next || _viv_playlist_start || _viv_random || !*_viv_current_fd->cFileName) return;
     string_get_path_part(folder, _viv_current_fd->cFileName);
     if (_viv_directory_scan)
@@ -14658,12 +14703,16 @@ static void _viv_schedule_directory_scan(void)
         return;
     }
     if (_viv_directory_cache && string_compare(folder, _viv_directory_cache->folder) == 0 &&
-        (!_viv_directory_cache->ready || WaitForSingleObject(_viv_directory_cache->changes, 0) == WAIT_TIMEOUT))
+        (!_viv_directory_cache->ready ||
+         (_viv_directory_cache->sort == sort && _viv_directory_cache->ascending == ascending &&
+          WaitForSingleObject(_viv_directory_cache->changes, 0) == WAIT_TIMEOUT)))
         return;
 
     scan = mem_alloc(sizeof(*scan));
     ZeroMemory(scan, sizeof(*scan));
     scan->hwnd = _viv_hwnd;
+    scan->sort = sort;
+    scan->ascending = ascending;
     string_copy(scan->folder, folder);
     // Keep the change notification alive after the enumeration thread exits.
     scan->changes = FindFirstChangeNotificationW(scan->folder, FALSE,

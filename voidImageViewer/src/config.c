@@ -62,7 +62,7 @@ BYTE config_show_status = 0;
 BYTE config_show_controls = 0;
 BYTE config_prevent_sleep = 1;
 BYTE config_loop_animations_once = 1;
-BYTE config_mouse_wheel_action = 1; // 0 = zoom, 1 = next/prev, 2=prev/next
+BYTE config_mouse_wheel_action = 1; // 0 = zoom, 1 = up previous, 2 = up next
 BYTE config_ctrl_mouse_wheel_action = 0; // 0 = zoom, 1 = next/prev, 2=prev/next
 BYTE config_left_click_action = 0; // 0 = scroll, 1 = play/pause slideshow, 2 = play/pause animation, 3=zoom in, 4=next, 5=1:1 scroll, 6=move-window
 BYTE config_right_click_action = 0; // 0 = context menu, 1=zoom out, 2=prev, 
@@ -266,6 +266,10 @@ void config_load_settings(void)
     if(config_defaults_version<4){
         viv_migrate_default_keys();
         config_defaults_version=4;
+    }
+    if(config_defaults_version<5){
+        if (config_mouse_wheel_action == 2) config_mouse_wheel_action = 1;
+        config_defaults_version = 5;
     }
     // Global defaults apply on first use; loaded display flags remain authoritative.
     config_show_status=0;

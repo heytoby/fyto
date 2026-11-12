@@ -1,5 +1,7 @@
 #include <windows.h>
 #include <windowsx.h>
+#include <emmintrin.h>
+#include <limits.h>
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -192,6 +194,38 @@ static void _viv_status_show(int show){(void)show;}
 static void _viv_controls_show(int show){(void)show;}
 #include "../build/presentation-under-test.h"
 
+#include "../build/mipmap-under-test.h"
+
+static void verify_top_down_mipmap(void)
+{
+    const DWORD red = 0xffd03020;
+    const DWORD green = 0xff207030;
+    const DWORD blue = 0xff254090;
+    const DWORD expected[] = {
+        red, red, red, red, green,
+        blue, blue, blue, blue, green,
+    };
+    BYTE *pixels;
+    HBITMAP full = fyto_image_dib(9, 3, 32, &pixels);
+    HBITMAP half;
+    DIBSECTION result;
+    DWORD *row = (DWORD *)pixels;
+    int y, x;
+
+    assert(full);
+    for (y = 0; y < 3; y++)
+    {
+        for (x = 0; x < 8; x++) row[y * 9 + x] = y < 2 ? red : blue;
+        row[y * 9 + 8] = green;
+    }
+    half = _viv_half_dib(full, 9, 3, 5, 2, TRUE);
+    assert(half && GetObject(half, sizeof(result), &result) == sizeof(result));
+    assert(result.dsBm.bmWidth == 5 && result.dsBm.bmHeight == 2);
+    assert(!memcmp(result.dsBm.bmBits, expected, sizeof(expected)));
+    DeleteObject(half);
+    DeleteObject(full);
+}
+
 static int same_rect(const RECT *a,const RECT *b){return !memcmp(a,b,sizeof(*a));}
 static int inside(const RECT *r,const RECT *b){return r->left>=b->left&&r->top>=b->top&&r->right<=b->right&&r->bottom<=b->bottom;}
 static unsigned long long contrast(const DWORD *a,const DWORD *b,int width,RECT r){
@@ -274,6 +308,7 @@ static void verify_text_rendering(void)
 int wmain(void){
     assert(fyto_text_initialize());
     verify_text_rendering();
+    verify_top_down_mipmap();
     int areas[][2]={{4096,4096},{2560,1392},{1080,1872},{800,552},{3840,2120}};
     int photos[][2]={{6000,4000},{4000,6000},{512,512},{1,1},{12000,1},{1,12000}};
     int a,p,cases=0;fyto_image_fit_t fit;RECT before,work,visible,canvas;POINT point;
