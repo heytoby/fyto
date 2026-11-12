@@ -1,0 +1,73 @@
+name: Verify fyto 1.0.0.48 changes
+on:
+  push:
+    branches: ['prepare/fyto-1.0.0.48']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Apply changes to the released source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prep = Join-Path $env:GITHUB_WORKSPACE '.github/fyto48'
+          $zip = Join-Path $env:RUNNER_TEMP 'fyto-base.zip'
+          $old = Join-Path $env:RUNNER_TEMP 'fyto-47'
+          $new = Join-Path $env:RUNNER_TEMP 'fyto-48'
+          git archive --format=zip "--output=$zip" a062c62a0bf4c061dcfeb5eba093cb9d4f13e682
+          if ($LASTEXITCODE) { throw 'git archive failed' }
+          Expand-Archive -LiteralPath $zip -DestinationPath $old
+          Expand-Archive -LiteralPath $zip -DestinationPath $new
+          python "$prep/cache.py" $new
+          if ($LASTEXITCODE) { throw 'Cache changes failed' }
+          python "$prep/directory.py" $new
+          if ($LASTEXITCODE) { throw 'Directory changes failed' }
+          & "$new/scripts/Set-Version.ps1" -Version 1.0.0.48
+          Copy-Item -LiteralPath "$prep/notes.md" -Destination "$new/RELEASE_NOTES.md"
+          python "$new/tests/test_playback_contract.py"
+          if ($LASTEXITCODE) { throw 'Playback regression' }
+          python "$prep/pack.py" $old $new
+          if ($LASTEXITCODE) { throw 'Source packing failed' }
+
+      - name: Build and test the Windows viewers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prep = Join-Path $env:GITHUB_WORKSPACE '.github/fyto48'
+          $old = Join-Path $env:RUNNER_TEMP 'fyto-47'
+          $new = Join-Path $env:RUNNER_TEMP 'fyto-48'
+          $vs = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $msbuild = & $vs -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if (!$msbuild) { throw 'MSBuild unavailable' }
+          python "$new/tests/prepare_presentation_test.py"
+          if ($LASTEXITCODE) { throw 'Presentation preparation failed' }
+          & $msbuild "$new/tests/presentation.vcxproj" /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE) { throw 'Presentation build failed' }
+          Push-Location $new
+          try {
+            & "$new/build/presentation-tests/test_presentation.exe"
+            if ($LASTEXITCODE) { throw 'Presentation regression' }
+          } finally { Pop-Location }
+          foreach ($dir in @($old, $new)) {
+            python "$prep/instrument.py" $dir
+            if ($LASTEXITCODE) { throw 'Instrumentation failed' }
+            & $msbuild "$dir/voidImageViewer/vs2019/voidImageViewer.vcxproj" /nologo /v:minimal /m /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto /p:PlatformToolset=v143 "/p:ForceImportBeforeCppTargets=$dir/build-overrides.targets"
+            if ($LASTEXITCODE) { throw "Viewer build failed for $dir" }
+          }
+          python -m pip install --disable-pip-version-check --quiet pillow
+          if ($LASTEXITCODE) { throw 'Fixture generator unavailable' }
+          $oldExe = "$old/voidImageViewer/vs2019/x64/Release/fyto.exe"
+          $newExe = "$new/voidImageViewer/vs2019/x64/Release/fyto.exe"
+          python "$new/tests/test_fyto_order.py" $newExe
+          if ($LASTEXITCODE) { throw 'Navigation regression' }
+          $run = Join-Path $env:RUNNER_TEMP 'fyto-verify-48'
+          New-Item -ItemType Directory -Path $run | Out-Null
+          python "$prep/runtime.py" $run $oldExe $newExe
+          if ($LASTEXITCODE) { throw 'Responsiveness or cache regression' }
