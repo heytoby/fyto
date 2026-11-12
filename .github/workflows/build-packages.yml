@@ -56,7 +56,7 @@ jobs:
           retention-days: 30
 
   macos:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
