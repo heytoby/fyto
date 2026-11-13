@@ -1,0 +1,32 @@
+name: Diagnose fyto JPEG preload
+on:
+  push:
+    branches: ['probe/fyto-1.0.0.50-preload']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: python -m pip install --disable-pip-version-check --quiet pillow
+      - name: Trace preloaded JPEGs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $msbuild = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
+          $sdk = (Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
+          foreach ($source in @($pwd.Path)) {
+            python tests/instrument-fyto-performance.py $source
+            if ($LASTEXITCODE) { throw 'Performance trace instrumentation failed' }
+            & $msbuild (Join-Path $source 'voidImageViewer/vs2019/voidImageViewer.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto /p:PlatformToolset=v143 "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$source/build-overrides.targets"
+            if ($LASTEXITCODE) { throw 'Performance trace build failed' }
+          }
+          $viewer = 'voidImageViewer/vs2019/x64/Release/fyto.exe'
+          python tests/verify-fyto-performance.py (Join-Path $env:RUNNER_TEMP 'fyto-performance') (Join-Path $pwd.Path $viewer) (Join-Path $pwd.Path $viewer) (Join-Path $pwd.Path $viewer)
+          if ($LASTEXITCODE) { throw 'Navigation or performance verification failed' }
