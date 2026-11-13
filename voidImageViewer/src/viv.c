@@ -1480,7 +1480,7 @@ static void _viv_show_preview(_viv_preview_t *preview, const WIN32_FIND_DATA *fi
     _viv_clear();
     _viv_preview = *preview;
     preview->hbitmap = NULL;
-    if (_viv_is_slideshow) _viv_preview.defer_detail = FALSE;
+    if (!config_preload_next || _viv_is_slideshow) _viv_preview.defer_detail = FALSE;
     if (_viv_preview.defer_detail)
     {
         _viv_jpeg_detail_started = GetTickCount();
@@ -1750,11 +1750,11 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 
         // Keep the neighbor ready while the displayed JPEG gains its full-resolution frame.
         preserve_preload = !_viv_active_load && _viv_preview.hbitmap &&
-            _viv_same_image(_viv_frame_fd, fd) && _viv_preload_preview.hbitmap;
+            _viv_same_image(_viv_frame_fd, fd) && (_viv_preload_preview.hbitmap || _viv_preload_frames);
     }
     if (!preserve_preload) _viv_clear_preload();
 
-    if (cached.hbitmap && cached.defer_detail && !_viv_is_slideshow)
+    if (cached.hbitmap && cached.defer_detail && config_preload_next && !_viv_is_slideshow)
     {
         _viv_cancel_load(FALSE);
         _viv_load_is_preload = 0;
@@ -14808,9 +14808,7 @@ static BOOL _viv_cached_directory_next(const WIN32_FIND_DATA *current, int prev,
     if (string_compare(folder, directory->folder) != 0) return FALSE;
     if (!fresh && _viv_directory_changed(directory))
     {
-        _viv_clear_loading_preload();
-        _viv_clear_preload();
-        _viv_clear_last();
+        // A rescan supplies fresh size and write times before any cached image is reused.
         return FALSE;
     }
 
@@ -14889,7 +14887,7 @@ static DWORD WINAPI _viv_scan_directory(void *arg)
     if (!InterlockedCompareExchange(&scan->cancelled, 0, 0))
     {
         scan->changes = FindFirstChangeNotificationW(scan->folder, FALSE,
-            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_SIZE |
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE |
             FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION);
     }
 
