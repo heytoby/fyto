@@ -1,0 +1,194 @@
+name: Verify fyto Windows upgrade and installer
+on:
+  push:
+    branches: ['verify/fyto-1.0.0.50']
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: windows-2022
+    timeout-minutes: 16
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyto-Windows-x64
+          run-id: 43454305500
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/fyto-verify
+
+      - name: Scan the built MSI and EXE with Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $folder = Join-Path $env:RUNNER_TEMP 'fyto-verify'
+          $platform = Join-Path $env:ProgramData 'Microsoft\Windows Defender\Platform'
+          $scanner = Get-ChildItem -Path "$platform\*\MpCmdRun.exe" -File | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$scanner) {
+            $scanner = Get-Item -LiteralPath (Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe')
+          }
+          foreach ($extension in @('msi', 'exe')) {
+            $package = Get-Item -LiteralPath (Join-Path $folder "fyto-Setup-1.0.0.50.$extension")
+            $scan = & $scanner.FullName -Scan -ScanType 3 -File $package.FullName -DisableRemediation 2>&1
+            $scan | Write-Output
+            if ($LASTEXITCODE -ne 0 -or ($scan -join ' ') -notmatch 'found no threats') {
+              throw "Defender did not return a clean scan for $($package.Name)"
+            }
+            $sha = (Get-FileHash -LiteralPath $package.FullName).Hash.ToLowerInvariant()
+            Write-Output "FYTO_DEFENDER_SCAN $($package.Name) $sha clean"
+          }
+
+      - name: Verify the Start menu icon after upgrading from 1.0.0.49
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $folder = Join-Path $env:RUNNER_TEMP 'fyto-verify'
+          $old = Join-Path $env:RUNNER_TEMP 'fyto-Setup-1.0.0.49.msi'
+          $new = Join-Path $folder 'fyto-Setup-1.0.0.50.exe'
+          $target = Join-Path $env:RUNNER_TEMP 'fyto prior installation'
+          Invoke-WebRequest -Uri 'https://github.com/heytoby/fyto/releases/download/v1.0.0.49/fyto-Setup-1.0.0.49.msi' -OutFile $old
+          if ((Get-FileHash -LiteralPath $old).Hash -ine 'a3c9a4143bfd1ba1c3cd657ea048a44fbcc56afe580af595b8c621efdfee3ff8') {
+            throw 'Published 1.0.0.49 MSI hash changed'
+          }
+          $msiexec = Join-Path $env:WINDIR 'System32\msiexec.exe'
+          function Install-Fyto([string]$package, [string]$logName, [string]$directory) {
+            $log = Join-Path $env:RUNNER_TEMP $logName
+            $arguments = '/i "{0}" /quiet /norestart /l*v "{1}"' -f $package, $log
+            if ($directory) {
+              $arguments += ' INSTALLFOLDER="{0}"' -f $directory
+            }
+            $process = Start-Process $msiexec -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 50 }
+              throw "MSI returned $($process.ExitCode)"
+            }
+          }
+          Install-Fyto $old 'fyto-49-install.log' $target
+          $viewerPath = Join-Path $target 'fyto.exe'
+          if ((Get-Item -LiteralPath $viewerPath).VersionInfo.FileVersion -ne '1.0.0.49') {
+            throw 'Expected 1.0.0.49 at the chosen install location'
+          }
+          $shortcutName = 'fyto ' + [char]0x4e2d + [char]0x6587 + [char]0x7248 + '.lnk'
+          $shortcut = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) $shortcutName
+          $ini = Join-Path $target 'fyto.ini'
+          Set-Content -LiteralPath $ini -Value @('[fyto]', 'fontsize=29')
+          $settingsHash = (Get-FileHash -LiteralPath $ini).Hash
+
+          $update = Start-Process -FilePath $new -ArgumentList '/update' -WindowStyle Hidden -PassThru
+          if (!$update.WaitForExit(45000)) {
+            $update.Kill()
+            throw 'The EXE update did not finish in 45 seconds'
+          }
+          if ($update.ExitCode -notin @(0, 3010)) {
+            throw "The EXE update returned $($update.ExitCode)"
+          }
+          if (!(Test-Path -LiteralPath (Join-Path $target 'wuffs-LICENSE'))) {
+            throw 'Installed decoder license is missing'
+          }
+          $viewer = Get-Item -LiteralPath $viewerPath
+          if ($viewer.VersionInfo.FileVersion -ne '1.0.0.50') {
+            throw '1.0.0.50 was not installed over 1.0.0.49'
+          }
+          if ((Get-FileHash -LiteralPath $ini).Hash -ne $settingsHash) {
+            throw 'Upgrade changed the existing settings'
+          }
+
+          $shell = New-Object -ComObject WScript.Shell
+          $testLink = Join-Path $env:RUNNER_TEMP 'fyto-start-verify.lnk'
+          [IO.File]::Copy($shortcut, $testLink)
+          $link = $shell.CreateShortcut($testLink)
+          $bytes = [IO.File]::ReadAllBytes($shortcut)
+          $flags = [BitConverter]::ToUInt32($bytes, 20)
+          Write-Output ('FYTO_START_LINK_FLAGS 0x{0:X} length {1}' -f $flags, $bytes.Length)
+          if ($flags -band 0x1000) {
+            throw 'Start menu shortcut is still MSI-advertised'
+          }
+
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          using System.Runtime.InteropServices.ComTypes;
+          public static class FytoVerifyShell {
+              [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+              private class ShellLink { }
+              [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+              private interface IShellLinkW {
+                  [PreserveSig]
+                  int GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int max, IntPtr findData, uint flags);
+              }
+              public static string GetTarget(string filename) {
+                  object shellLink = new ShellLink();
+                  try {
+                      ((IPersistFile)shellLink).Load(filename, 0);
+                      var path = new StringBuilder(32768);
+                      int result = ((IShellLinkW)shellLink).GetPath(path, path.Capacity, IntPtr.Zero, 4);
+                      if (result < 0) Marshal.ThrowExceptionForHR(result);
+                      return path.ToString();
+                  } finally {
+                      Marshal.FinalReleaseComObject(shellLink);
+                  }
+              }
+              [DllImport("shell32.dll", EntryPoint = "ExtractIconExW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+              public static extern uint ExtractIcon(string path, int index, [Out] IntPtr[] large, [Out] IntPtr[] small, uint count);
+              [DllImport("user32.dll")]
+              public static extern bool DestroyIcon(IntPtr icon);
+          }
+          '@
+          $targetPath = [FytoVerifyShell]::GetTarget($shortcut)
+          if ($targetPath -ine $viewer.FullName) {
+            Write-Output "FYTO_START_LINK_BYTES $([Convert]::ToBase64String($bytes))"
+            throw "Start menu target is [$targetPath], WScript ASCII copy target is [$($link.TargetPath)], expected [$($viewer.FullName)]"
+          }
+          if ($link.IconLocation -and $link.IconLocation -ne ',0' -and $link.IconLocation -ine ($viewer.FullName + ',0')) {
+            throw "Start menu shortcut uses an unexpected icon source $($link.IconLocation)"
+          }
+          $large = [IntPtr[]]::new(1)
+          $small = [IntPtr[]]::new(1)
+          $count = [FytoVerifyShell]::ExtractIcon($targetPath, 0, $large, $small, 1)
+          if ($count -eq 0 -or $large[0] -eq [IntPtr]::Zero -or $small[0] -eq [IntPtr]::Zero) {
+            throw 'The Start menu shortcut target did not expose the embedded icon'
+          }
+          [void][FytoVerifyShell]::DestroyIcon($large[0])
+          [void][FytoVerifyShell]::DestroyIcon($small[0])
+          $hash = (Get-FileHash -LiteralPath $new).Hash.ToLowerInvariant()
+          Write-Output "FYTO_START_ICON_49_TO_50 $hash verified"
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 6
+          persist-credentials: false
+      - name: Check wheel and arrow directions in the upgraded viewer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --disable-pip-version-check --quiet pillow
+          if ($LASTEXITCODE) { throw 'Test fixture generator unavailable' }
+          $viewer = Join-Path $env:RUNNER_TEMP 'fyto prior installation/fyto.exe'
+          python tests/test_fyto_order.py $viewer
+          if ($LASTEXITCODE) { throw 'Upgraded viewer navigation regression' }
+
+      - name: Compare JPEG and PNG presentation on the same Windows host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $msbuild = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
+          $sdk = (Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
+          $baseline = Join-Path $env:RUNNER_TEMP 'fyto-v49-baseline'
+          $archive = Join-Path $env:RUNNER_TEMP 'fyto-v49-baseline.zip'
+          git archive --format=zip --output="$archive" 5ea49d9d594295ea8a641209854fff86d12779b1
+          if ($LASTEXITCODE) { throw 'Baseline source is unavailable' }
+          Expand-Archive -LiteralPath $archive -DestinationPath $baseline
+          foreach ($source in @($baseline, $pwd.Path)) {
+            python tests/instrument-fyto-performance.py $source
+            if ($LASTEXITCODE) { throw 'Performance trace instrumentation failed' }
+            & $msbuild (Join-Path $source 'voidImageViewer/vs2019/voidImageViewer.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto /p:PlatformToolset=v143 "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$source/build-overrides.targets"
+            if ($LASTEXITCODE) { throw 'Performance trace build failed' }
+          }
+          $viewer = 'voidImageViewer/vs2019/x64/Release/fyto.exe'
+          python tests/verify-fyto-performance.py (Join-Path $env:RUNNER_TEMP 'fyto-performance') (Join-Path $baseline $viewer) (Join-Path $pwd.Path $viewer) (Join-Path $env:RUNNER_TEMP 'fyto prior installation/fyto.exe')
+          if ($LASTEXITCODE) { throw 'Navigation or performance verification failed' }
