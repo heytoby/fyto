@@ -17,6 +17,13 @@ typedef struct fyto_wic_image {
     IWICBitmapFrameDecode *frame;
     IWICColorContext *profile, *srgb;
     UINT wide, high;
+#ifdef FYTO_HAVE_TURBO_JPEG
+    HGLOBAL input_handle;
+    const BYTE *input_data;
+    size_t input_size;
+    BOOL (*cancelled)(void *);
+    void *cancel_context;
+#endif
 } fyto_wic_image;
 
 static HBITMAP fyto_image_dib(UINT wide, UINT high, UINT bit_count, BYTE **pixels)
@@ -35,8 +42,35 @@ static HBITMAP fyto_image_dib(UINT wide, UINT high, UINT bit_count, BYTE **pixel
     return CreateDIBSection(NULL, &info, DIB_RGB_COLORS, (void **)(pixels ? pixels : &unused), NULL, 0);
 }
 
+#ifdef FYTO_HAVE_TURBO_JPEG
+#include "jpeg_decode.h"
+static void fyto_jpeg_set_input(fyto_wic_image *jpeg, IStream *stream,
+    BOOL (*cancelled)(void *), void *context)
+{
+    HGLOBAL handle;
+    if (SUCCEEDED(GetHGlobalFromStream(stream, &handle)))
+    {
+        jpeg->input_data = (const BYTE *)GlobalLock(handle);
+        if (jpeg->input_data)
+        {
+            jpeg->input_handle = handle;
+            jpeg->input_size = GlobalSize(handle);
+            jpeg->cancelled = cancelled;
+            jpeg->cancel_context = context;
+        }
+    }
+}
+static BOOL fyto_jpeg_cancelled(const fyto_wic_image *jpeg)
+{
+    return jpeg->cancelled && jpeg->cancelled(jpeg->cancel_context);
+}
+#endif
+
 static void fyto_wic_close(fyto_wic_image *jpeg)
 {
+#ifdef FYTO_HAVE_TURBO_JPEG
+    if (jpeg->input_handle) GlobalUnlock(jpeg->input_handle);
+#endif
     if (jpeg->srgb) IWICColorContext_Release(jpeg->srgb);
     if (jpeg->profile) IWICColorContext_Release(jpeg->profile);
     if (jpeg->frame) IWICBitmapFrameDecode_Release(jpeg->frame);
@@ -135,6 +169,16 @@ static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT 
     BYTE *pixels;
     HBITMAP bitmap = NULL;
 
+#ifdef FYTO_HAVE_TURBO_JPEG
+    /* Decode ordinary RGB/gray images directly into the final DIB. */
+    if (!jpeg->profile && transform == WICBitmapTransformRotate0)
+    {
+        bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
+            jpeg->wide, jpeg->high, 1, 32, wide, high,
+            jpeg->cancelled, jpeg->cancel_context);
+        if (bitmap || fyto_jpeg_cancelled(jpeg)) return bitmap;
+    }
+#endif
     source = (IWICBitmapSource *)jpeg->frame;
     if (jpeg->profile)
     {
@@ -196,6 +240,27 @@ static HBITMAP fyto_jpeg_preview(const fyto_wic_image *jpeg, UINT edge, UINT *wi
     BYTE *pixels;
     UINT stride, image_edge = max(jpeg->wide, jpeg->high);
 
+#ifdef FYTO_HAVE_TURBO_JPEG
+    if (image_edge)
+    {
+        UINT denominator = 4;
+        UINT preview_edge = min(edge, (image_edge + 3) / 4);
+        if ((image_edge + 3) / 4 > preview_edge) denominator = 8;
+        bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
+            jpeg->wide, jpeg->high, denominator, 24, wide, high,
+            jpeg->cancelled, jpeg->cancel_context);
+        if (bitmap && jpeg->profile)
+        {
+            BITMAP dib;
+            HBITMAP colored = NULL;
+            if (GetObject(bitmap, sizeof(dib), &dib))
+                colored = fyto_jpeg_color_preview(jpeg, dib.bmBits, *wide, *high, dib.bmWidthBytes);
+            DeleteObject(bitmap);
+            bitmap = colored;
+        }
+        if (bitmap || fyto_jpeg_cancelled(jpeg)) return bitmap;
+    }
+#endif
     if (!image_edge ||
         FAILED(IWICBitmapFrameDecode_QueryInterface(jpeg->frame, &IID_IWICBitmapSourceTransform, (void **)&transform)))
         return NULL;

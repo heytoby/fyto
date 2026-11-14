@@ -1,28 +1,46 @@
-name: Diagnose fyto presentation
+name: Diagnose fyto JPEG throughput
 on:
   push:
     branches: ['probe/fyto-51']
 permissions:
   contents: read
+  actions: read
 jobs:
-  trace:
+  jpeg:
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Build a traced viewer
+      - name: Build the SIMD JPEG decoder
+        shell: pwsh
+        run: |
+          if (!(Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm --version=2.16.03 --yes --no-progress
+            if ($LASTEXITCODE) { throw 'NASM install failed' }
+            $env:PATH += ';C:\Program Files\NASM;C:\ProgramData\chocolatey\bin'
+          }
+          ./scripts/Build-Jpeg.ps1
+      - name: Build production and traced viewers
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          python tests/instrument-fyto-performance.py $pwd.Path
-          if ($LASTEXITCODE) { throw 'Instrumentation failed' }
+          python tests/test_playback_contract.py
+          if ($LASTEXITCODE) { throw 'Playback regression' }
           $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
           $msbuild=& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
-          & $msbuild voidImageViewer/vs2019/voidImageViewer.vcxproj /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto /p:PlatformToolset=v143 "/p:ForceImportBeforeCppTargets=$pwd/build-overrides.targets"
-          if ($LASTEXITCODE) { throw 'Trace build failed' }
+          New-Item -ItemType Directory -Path artifacts/production,artifacts/trace -Force | Out-Null
+          foreach ($mode in @('production','trace')) {
+            if ($mode -eq 'trace') {
+              python tests/instrument-fyto-performance.py $pwd.Path
+              if ($LASTEXITCODE) { throw 'Instrumentation failed' }
+            }
+            & $msbuild voidImageViewer/vs2019/voidImageViewer.vcxproj /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto /p:PlatformToolset=v143 "/p:ForceImportBeforeCppTargets=$pwd/build-overrides.targets"
+            if ($LASTEXITCODE) { throw 'Viewer build failed' }
+            Copy-Item voidImageViewer/vs2019/x64/Release/fyto.exe "artifacts/$mode/fyto.exe"
+          }
       - uses: actions/upload-artifact@v4
         with:
-          name: fyto-50-trace
-          path: voidImageViewer/vs2019/x64/Release/fyto.exe
+          name: fyto-jpeg-candidate
+          path: artifacts/
