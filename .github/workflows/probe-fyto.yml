@@ -30,6 +30,11 @@ jobs:
           if ($LASTEXITCODE) { throw 'Playback regression' }
           $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
           $msbuild=& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          python -m pip install --disable-pip-version-check --quiet pillow
+          & $msbuild tests/jpeg_decode.vcxproj /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:ForceImportBeforeCppTargets=$pwd/build-overrides.targets"
+          if ($LASTEXITCODE) { throw 'JPEG test build failed' }
+          python tests/verify_jpeg_decode.py build/jpeg-tests/test_jpeg_decode.exe
+          if ($LASTEXITCODE) { throw 'JPEG pixel or cancellation regression' }
           New-Item -ItemType Directory -Path artifacts/production,artifacts/trace -Force | Out-Null
           foreach ($mode in @('production','trace')) {
             if ($mode -eq 'trace') {
