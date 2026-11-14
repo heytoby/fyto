@@ -1,0 +1,28 @@
+name: Diagnose fyto presentation
+on:
+  push:
+    branches: ['probe/fyto-51']
+permissions:
+  contents: read
+jobs:
+  trace:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build a traced viewer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python tests/instrument-fyto-performance.py $pwd.Path
+          if ($LASTEXITCODE) { throw 'Instrumentation failed' }
+          $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $msbuild=& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          & $msbuild voidImageViewer/vs2019/voidImageViewer.vcxproj /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto /p:PlatformToolset=v143 "/p:ForceImportBeforeCppTargets=$pwd/build-overrides.targets"
+          if ($LASTEXITCODE) { throw 'Trace build failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fyto-50-trace
+          path: voidImageViewer/vs2019/x64/Release/fyto.exe
