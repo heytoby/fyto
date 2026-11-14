@@ -1,3 +1,5 @@
+Windows builds require Visual Studio 2022 C++ Build Tools, CMake, NASM, Python and Pillow. Run scripts/Build-Release.ps1 to verify and package the application. The script downloads and checks the pinned libjpeg-turbo 3.2.1 source, then builds a static x64 SIMD decoder. Direct viewer builds must run scripts/Build-Jpeg.ps1 first and use the root build-overrides.targets. The existing WIC decoder remains the fallback, including full-resolution ICC transforms and EXIF rotations.
+
 Build vs2019/voidImageViewer.vcxproj with MSVC v142, Release x64, /p:TargetName=fyto and root build-overrides.targets.
 Installer uses WiX6 UI extension and .NET8. Original MIT and WebP licenses are preserved unchanged.
 See fyto-validation.json for validation and limitations.

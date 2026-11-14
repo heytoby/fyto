@@ -10803,6 +10803,9 @@ static BOOL _viv_load_fast_jpeg(_viv_load_job_t *job, IStream *stream, int *know
     BOOL loaded = FALSE;
     IStream *input = fyto_jpeg_stream_create(stream, _viv_load_discarded, job);
 
+#ifdef FYTO_HAVE_TURBO_JPEG
+    fyto_jpeg_set_input(&jpeg, stream, _viv_load_discarded, job);
+#endif
     if (fyto_jpeg_open(&jpeg, input ? input : stream, job->use_icm))
     {
         BOOL reduce = _viv_loading_in_background(job) && !_viv_cache_image_fits(jpeg.wide, jpeg.high, 1);

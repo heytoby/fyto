@@ -12,6 +12,7 @@ if(!$msbuild){throw 'Visual Studio C++ Build Tools required'}
 $sdkRoot=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
 $sdk=(Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
 if(!$sdk){throw 'A versioned Windows SDK is required'}
+& (Join-Path $root 'scripts/Build-Jpeg.ps1') -Root $root
 & python (Join-Path $root 'tests/test_playback_contract.py')
 if($LASTEXITCODE -ne 0){throw 'Playback contract check failed'}
 & python (Join-Path $root 'tests/prepare_presentation_test.py')
@@ -24,6 +25,10 @@ if($LASTEXITCODE -ne 0){throw 'Presentation regression check failed'}
 if($LASTEXITCODE -ne 0){throw 'Primary display test build failed'}
 & (Join-Path $root 'build/primary-display-tests/test_primary_display.exe')
 if($LASTEXITCODE -ne 0){throw 'Primary display regression check failed'}
+& $msbuild (Join-Path $root 'tests/jpeg_decode.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
+if($LASTEXITCODE -ne 0){throw 'JPEG test build failed'}
+& python (Join-Path $root 'tests/verify_jpeg_decode.py') (Join-Path $root 'build/jpeg-tests/test_jpeg_decode.exe')
+if($LASTEXITCODE -ne 0){throw 'JPEG decoding regression'}
 & $msbuild (Join-Path $root 'voidImageViewer/vs2019/voidImageViewer.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
 if($LASTEXITCODE -ne 0){throw 'Viewer build failed'}
 $build=Join-Path $root 'build';$payload=Join-Path $build 'payload';$out=Join-Path $root 'release-assets'
@@ -33,6 +38,7 @@ Copy-Item (Join-Path $root 'LICENSE') $payload
 Copy-Item (Join-Path $root 'voidImageViewer/libwebp/COPYING') (Join-Path $payload 'libwebp-COPYING')
 Copy-Item (Join-Path $root 'voidImageViewer/libwebp/PATENTS') (Join-Path $payload 'libwebp-PATENTS')
 Copy-Item (Join-Path $root 'voidImageViewer/wuffs/LICENSE') (Join-Path $payload 'wuffs-LICENSE')
+Copy-Item (Join-Path $root 'third_party/libjpeg-turbo-LICENSE.txt') (Join-Path $payload 'libjpeg-turbo-LICENSE.txt')
 Copy-Item (Join-Path $root 'THIRD_PARTY_NOTICES.md') (Join-Path $payload 'NOTICE.txt')
 Copy-Item (Join-Path $root 'README.md') (Join-Path $payload 'README.txt')
 if($WixDll -and $UiExtension){
@@ -62,7 +68,7 @@ Copy-Item (Join-Path $build 'fyto-Setup.exe') $installer
 $test=Start-Process $installer -ArgumentList '/verify' -PassThru -Wait -WindowStyle Hidden
 if($test.ExitCode -ne 0){throw 'Installer verification failed'}
 $zip=Join-Path $out "fyto-Setup-$version.zip"
-Compress-Archive -Path $msi,(Join-Path $payload 'LICENSE'),(Join-Path $payload 'libwebp-COPYING'),(Join-Path $payload 'libwebp-PATENTS'),(Join-Path $payload 'NOTICE.txt'),(Join-Path $payload 'README.txt') -DestinationPath $zip -Force
+Compress-Archive -Path $msi,(Join-Path $payload 'LICENSE'),(Join-Path $payload 'libwebp-COPYING'),(Join-Path $payload 'libwebp-PATENTS'),(Join-Path $payload 'NOTICE.txt'),(Join-Path $payload 'libjpeg-turbo-LICENSE.txt'),(Join-Path $payload 'README.txt') -DestinationPath $zip -Force
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $source=Join-Path $out "fyto-source-$version.zip"
