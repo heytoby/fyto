@@ -36,7 +36,23 @@ static int compare(HBITMAP a, HBITMAP b)
         }
     total /= (double)x.bmWidth * x.bmHeight * 3;
     printf("PIXEL_DIFF mean=%.5f max=%u\n", total, largest);
-    return total < 2.0 && largest <= 40;
+    return total < 0.2 && largest <= 6;
+}
+/* WIC's native JPEG transform cannot return 24-bit previews for grayscale input.
+   Validate the new grayscale preview's geometry and equal color channels. */
+static int gray_preview(HBITMAP bitmap, UINT wide, UINT high)
+{
+    BITMAP dib;
+    UINT row, col;
+    if (!bitmap || !GetObject(bitmap, sizeof(dib), &dib) || dib.bmBitsPixel != 24 ||
+        dib.bmWidth != (LONG)((wide+3)/4) || dib.bmHeight != (LONG)((high+3)/4)) return 0;
+    for (row=0; row<(UINT)dib.bmHeight; ++row)
+        for (col=0; col<(UINT)dib.bmWidth; ++col)
+        {
+            BYTE *p=(BYTE *)dib.bmBits+row*dib.bmWidthBytes+col*3;
+            if (p[0]!=p[1] || p[1]!=p[2]) return 0;
+        }
+    return 1;
 }
 int wmain(int argc, wchar_t **argv)
 {
@@ -77,7 +93,15 @@ int wmain(int argc, wchar_t **argv)
         fast = fyto_jpeg_preview(&jpeg, 1024, &w, &h);
         jpeg.input_data = NULL;
         reference = fyto_jpeg_preview(&jpeg, 1024, &w, &h);
-        if (!compare(fast, reference)) failed = 1;
+        {
+            WICPixelFormatGUID format;
+            IWICBitmapFrameDecode_GetPixelFormat(jpeg.frame, &format);
+            if (!reference && IsEqualGUID(&format, &GUID_WICPixelFormat8bppGray))
+            {
+                if (!gray_preview(fast, jpeg.wide, jpeg.high)) failed=1;
+            }
+            else if (!compare(fast, reference)) failed=1;
+        }
         if (fast) DeleteObject(fast);
         if (reference) DeleteObject(reference);
         fast = fyto_jpeg_decode_pixels(input, jpeg.input_size, jpeg.wide, jpeg.high, 1, 32, &w, &h, cancel_decode, &calls);
