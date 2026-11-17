@@ -1972,7 +1972,7 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 			break;
 	
 		case VIV_ID_HELP_HELP:
-			ShellExecuteA(_viv_hwnd,NULL,"https://github.com/voidtools/voidImageViewer",NULL,NULL,SW_SHOWNORMAL);
+			ShellExecuteA(_viv_hwnd,NULL,"https://github.com/heytoby/fyto",NULL,NULL,SW_SHOWNORMAL);
 			break;
 			
 		case VIV_ID_HELP_COMMAND_LINE_OPTIONS:
@@ -1980,7 +1980,7 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 			break;
 			
 		case VIV_ID_HELP_DONATE:
-			ShellExecuteA(_viv_hwnd,NULL,"https://www.voidtools.com/donate/",NULL,NULL,SW_SHOWNORMAL);
+			ShellExecuteA(_viv_hwnd,NULL,"https://github.com/heytoby/fyto",NULL,NULL,SW_SHOWNORMAL);
 			break;
 			
 		case 60003: fyto_format_dialog(_viv_hwnd); break;
@@ -1990,7 +1990,7 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 			break;
 			
 		case VIV_ID_HELP_WEBSITE:
-			ShellExecuteA(_viv_hwnd,NULL,"https://www.voidtools.com/",NULL,NULL,SW_SHOWNORMAL);
+			ShellExecuteA(_viv_hwnd,NULL,"https://github.com/heytoby/fyto",NULL,NULL,SW_SHOWNORMAL);
 			break;
 			
 		case VIV_ID_FILE_EXIT:

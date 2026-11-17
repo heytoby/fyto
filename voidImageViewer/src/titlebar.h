@@ -22,6 +22,13 @@ static void title_release_fonts(void)
     if (title_menu_font)DeleteObject(title_menu_font);
     title_font=title_menu_font=NULL;
 }
+// The caption/menu row is window chrome, not part of the image canvas.
+// Keep it light grey so it reads like a normal Windows title bar instead of
+// a black band above the picture.
+static COLORREF title_chrome_bg(void)
+{
+	return GetSysColor(COLOR_BTNFACE);
+}
 static void title_paint(HWND hwnd)
 {
     RECT wr,cr,r,bar;
@@ -29,7 +36,7 @@ static void title_paint(HWND hwnd)
     HDC dc, target, buffer;
     int width,height,i,x,button,padding,margin;
     wchar_t label[256],filename[STRING_SIZE];
-    COLORREF bg=_viv_exif_background();
+    COLORREF bg=title_chrome_bg();
 
     if (!config_show_caption) {
         title_dirty = FALSE;
