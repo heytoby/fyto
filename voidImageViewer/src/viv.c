@@ -10443,7 +10443,7 @@ static void _viv_update_frame(const RECT *target)
         if (!_viv_is_fullscreen)
         {
             DWORD style=GetWindowLong(_viv_hwnd,GWL_STYLE);
-            DWORD chrome=WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX;
+            DWORD chrome=WS_CAPTION|WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX|(config_show_thickframe?WS_THICKFRAME:0);
             if ((style & chrome)!=chrome)SetWindowLong(_viv_hwnd,GWL_STYLE,style|chrome);
         }
         if (GetMenu(_viv_hwnd))SetMenu(_viv_hwnd,NULL);
