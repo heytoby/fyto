@@ -1283,7 +1283,7 @@ HMODULE LoadUnicowsProc(void)
 }
 
 // EXIF reserves a side panel; the original viewer chrome and coordinates are retained.
-static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);}
+static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);r->bottom-=_viv_get_status_high()+_viv_get_controls_high();if(r->bottom<0)r->bottom=0;}
 // Windows offers no working process-wide switch on this build (SetPreferredAppMode
 // is ignored), so a window's frame can only be set per window, through DWM. This
 // runs once per window when it is activated; it draws nothing itself.
@@ -15375,9 +15375,9 @@ static void _viv_fit_image_window(void)
         /* Preserve a single image long edge, independent of the next aspect ratio. */
         if(_viv_zoom_pos || _viv_1to1 || _viv_doing==_VIV_DOING_1TO1SCROLL)return;
         if(!_viv_manual_long_edge)_viv_remember_manual_size();
-        if(!fyto_long_edge_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height(),config_show_exif,
+        if(!fyto_long_edge_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height()+_viv_get_status_high(),config_show_exif,
             MulDiv(340,os_logical_high,96),_viv_manual_long_edge,&fit))return;
-    }else if(!fyto_default_display_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height(),config_show_exif,MulDiv(340,os_logical_high,96),&fit))return;
+    }else if(!fyto_default_display_fit(bw,bh,_viv_image_wide,_viv_image_high,title_height()+_viv_get_status_high(),config_show_exif,MulDiv(340,os_logical_high,96),&fit))return;
     x=(r.left+r.right-fit.window_width)/2;y=(r.top+r.bottom-fit.window_height)/2;
     x=max(mi.rcWork.left,min(x,mi.rcWork.right-fit.window_width));y=max(mi.rcWork.top,min(y,mi.rcWork.bottom-fit.window_height));
     SetRect(&target,x,y,x+fit.window_width,y+fit.window_height);
@@ -15395,7 +15395,9 @@ static BOOL _viv_mode_window_rect(const RECT *original,const RECT *photo,const R
 {
     int width,height,area_width,area_height,x,y;
     int work_width=work->right-work->left,work_height=work->bottom-work->top;
-    int chrome_height=title_height();
+    int top_chrome=title_height();
+    int bottom_chrome=standard?MulDiv(24,os_logical_high,96):0;
+    int chrome_height=top_chrome+bottom_chrome;
     int sidebar_limit=config_show_exif?MulDiv(340,os_logical_high,96):0;
     int photo_width=photo->right-photo->left,photo_height=photo->bottom-photo->top;
     int tolerance=max(2,MulDiv(2,os_logical_high,96));
@@ -15436,7 +15438,7 @@ static BOOL _viv_mode_window_rect(const RECT *original,const RECT *photo,const R
 
     // Position the new image around the old image's center, independent of chrome.
     x=photo->left+(photo_width-width)/2;
-    y=photo->top+(photo_height-height)/2-chrome_height;
+    y=photo->top+(photo_height-height)/2-top_chrome;
     width+=min(sidebar_limit,width);
     height+=chrome_height;
     x=max(work->left,min(x,work->right-width));
@@ -15467,7 +15469,7 @@ static void _viv_set_view_mode(BOOL standard)
     config_show_menu=standard;
     config_show_caption=standard;
     config_show_thickframe=standard;
-    config_show_status=0;
+    config_show_status=standard;
     config_show_controls=0;
     refit=refit && _viv_mode_window_rect(&original,&photo,&work,screen_filling,standard,&target);
     if (refit)_viv_fitting_window=1;

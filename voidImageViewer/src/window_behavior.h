@@ -58,7 +58,7 @@ static void fyto_restore_for_drag(HWND hwnd,POINT cursor)
     _viv_dst_zoom_x_pos=_viv_dst_zoom_y_pos=_VIV_DST_ZOOM_ONE;
     _viv_dst_pos_x=_viv_dst_pos_y=500;_viv_view_x=_viv_view_y=0;_viv_view_ix=_viv_view_iy=0.0;
     if(_viv_frame_count && fyto_default_display_fit(monitor.rcWork.right-monitor.rcWork.left,
-        monitor.rcWork.bottom-monitor.rcWork.top,_viv_image_wide,_viv_image_high,title_height(),
+        monitor.rcWork.bottom-monitor.rcWork.top,_viv_image_wide,_viv_image_high,title_height()+_viv_get_status_high(),
         config_show_exif,MulDiv(340,os_logical_high,96),&fit)){
         width=fit.window_width;height=fit.window_height;
     }else{

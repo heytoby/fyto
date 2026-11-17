@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright 2025 voidtools / David Carpenter
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -275,7 +275,7 @@ void config_load_settings(void)
         config_defaults_version = 5;
     }
     // Global defaults apply on first use; loaded display flags remain authoritative.
-    config_show_status=0;
+    config_show_status=config_show_caption || config_show_menu;
     config_show_controls=0;
 	config_show_exif=0;
 }
