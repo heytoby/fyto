@@ -1313,6 +1313,19 @@ static void _viv_apply_theme(void)
     config_fullscreen_background_color_r=GetRValue(c);
     config_fullscreen_background_color_g=GetGValue(c);
     config_fullscreen_background_color_b=GetBValue(c);
+    /* Shell dialogs (open / save / folder / properties) take their frame from the
+       application mode, not from our palette. Declaring the mode here is what makes
+       those windows match the theme; nothing is drawn over them. */
+    {
+        HMODULE uxtheme=LoadLibraryW(L"uxtheme.dll");
+        if (uxtheme)
+        {
+            typedef int (WINAPI *set_app_mode_t)(int);
+            set_app_mode_t set_app_mode=(set_app_mode_t)GetProcAddress(uxtheme,MAKEINTRESOURCEA(135));
+            if (set_app_mode)set_app_mode(config_theme?3:2); /* 2 ForceDark, 3 ForceLight */
+            FreeLibrary(uxtheme);
+        }
+    }
     _viv_apply_menu_theme();
     /* Our title row lives in the non-client area, which Windows caches: without
        an explicit frame redraw the window keeps the previous colour until some
