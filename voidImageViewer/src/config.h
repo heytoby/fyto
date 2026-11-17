@@ -127,5 +127,4 @@ extern BYTE config_title_bar_format;
 extern int config_language; // 0 = English, 1 = Simplified Chinese
 
 extern int config_show_exif;
-extern int config_assoc_prompt;
 extern int config_middle_click_action;

@@ -174,57 +174,50 @@ static BOOL fyto_set_default(HWND owner,unsigned index)
 }
 // Windows signs UserChoice, so a checked box can only be applied by letting the
 // user confirm that format once in the system Open With dialog.
-static void fyto_apply_formats(HWND owner)
+static void fyto_sync_boxes(HWND hwnd)
 {
-    DWORD mask=fyto_initial_format_selection();unsigned i;
-    fyto_register_formats();
-    for(i=0;i<FYTO_FORMAT_COUNT;i++){
-        if(!fyto_offered_format(i) || !(mask&(1u<<i)))continue;
-        if(fyto_is_default(fyto_extensions[i]))continue;
-        if(!fyto_set_default(owner,i))break;
-    }
+    unsigned i;
+    for(i=0;i<FYTO_FORMAT_COUNT;i++)
+        if(fyto_offered_format(i))
+            CheckDlgButton(hwnd,61000+i,fyto_is_default(fyto_extensions[i])?BST_CHECKED:BST_UNCHECKED);
 }
 static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
 {
     unsigned i;
     if(msg==WM_INITDIALOG){
-        DWORD mask=fyto_initial_format_selection();unsigned n=0;
         fyto_formats_window=hwnd;
         SetWindowTextW(hwnd,L"fyto · 默认图片浏览器");
         fyto_format_control(hwnd,L"STATIC",L"是否将 fyto 设置为默认图片浏览器？",0,0,12,12,280,16);
         fyto_format_control(hwnd,L"BUTTON",L"全选",WS_TABSTOP,61201,300,10,64,18);
-        fyto_format_control(hwnd,L"STATIC",L"勾选即设置，Windows 会为每个格式确认一次。",0,0,12,34,352,14);
+        fyto_format_control(hwnd,L"STATIC",L"点选格式即可设为默认，Windows 会确认一次。",0,0,12,34,352,14);
         for(i=0;i<FYTO_FORMAT_COUNT;i++){
-            int x,y;
+            int x,y;unsigned n=0,k;
             if(!fyto_offered_format(i))continue;
-            x=12+(int)(n%3)*120;y=58+(int)(n/3)*26;n++;
+            for(k=0;k<i;k++)if(fyto_offered_format(k))n++;
+            x=12+(int)(n%3)*120;y=58+(int)(n/3)*26;
             fyto_format_control(hwnd,L"BUTTON",fyto_extensions[i],WS_TABSTOP|BS_AUTOCHECKBOX,61000+i,x,y,112,20);
-            CheckDlgButton(hwnd,61000+i,(mask&(1u<<i))?BST_CHECKED:BST_UNCHECKED);
         }
-        fyto_format_control(hwnd,L"BUTTON",L"启动时提醒",WS_TABSTOP|BS_AUTOCHECKBOX,61203,12,140,140,18);
-        CheckDlgButton(hwnd,61203,config_assoc_prompt?BST_CHECKED:BST_UNCHECKED);
-        fyto_format_control(hwnd,L"BUTTON",L"确认",WS_TABSTOP|BS_DEFPUSHBUTTON,IDOK,196,138,80,22);
-        fyto_format_control(hwnd,L"BUTTON",L"取消",WS_TABSTOP,IDCANCEL,286,138,80,22);
+        fyto_sync_boxes(hwnd);
+        fyto_format_control(hwnd,L"BUTTON",L"关闭",WS_TABSTOP|BS_DEFPUSHBUTTON,IDCANCEL,286,138,80,22);
         return TRUE;
     }
     if(msg==WM_COMMAND){
         int id=LOWORD(wp);
         if(id==61201){
             for(i=0;i<FYTO_FORMAT_COUNT;i++)
-                if(fyto_offered_format(i))CheckDlgButton(hwnd,61000+i,BST_CHECKED);
+                if(fyto_offered_format(i) && !fyto_is_default(fyto_extensions[i]))fyto_set_default(hwnd,i);
+            fyto_sync_boxes(hwnd);
             return TRUE;
         }
-        if(id==IDOK || id==IDCANCEL){
-            BOOL was=config_assoc_prompt!=0;
-            config_assoc_prompt=IsDlgButtonChecked(hwnd,61203)==BST_CHECKED?1:0;
-            if(was!=(config_assoc_prompt!=0))config_save_settings(config_appdata);
-            if(id==IDOK){
-                if(!fyto_save_format_selection(hwnd))return TRUE;
-                EndDialog(hwnd,1);
-            }else{
-                fyto_write_association_value(L"SetupVersion",1);
-                EndDialog(hwnd,0);
-            }
+        if(id>=61000 && id<61000+FYTO_FORMAT_COUNT){
+            i=(unsigned)(id-61000);
+            if(fyto_offered_format(i) && !fyto_is_default(fyto_extensions[i]))fyto_set_default(hwnd,i);
+            CheckDlgButton(hwnd,id,fyto_is_default(fyto_extensions[i])?BST_CHECKED:BST_UNCHECKED);
+            return TRUE;
+        }
+        if(id==IDCANCEL){
+            fyto_write_association_value(L"SetupVersion",1);
+            EndDialog(hwnd,0);
             return TRUE;
         }
     }
@@ -236,37 +229,17 @@ static void fyto_format_dialog(HWND owner)
 #pragma pack(push,2)
     struct {DLGTEMPLATE dlg;WORD menu,cls,title,point;wchar_t font[9];} data;
 #pragma pack(pop)
-    INT_PTR result;
     if(fyto_formats_window && IsWindow(fyto_formats_window)){SetForegroundWindow(fyto_formats_window);return;}
     ZeroMemory(&data,sizeof(data));data.dlg.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME|DS_CENTER|DS_SETFONT;data.dlg.cx=376;data.dlg.cy=172;
     data.point=9;lstrcpyW(data.font,L"Microsoft YaHei UI");
-    result=DialogBoxIndirectParamW(GetModuleHandleW(NULL),&data.dlg,owner,fyto_formats_proc,0);
+    DialogBoxIndirectParamW(GetModuleHandleW(NULL),&data.dlg,owner,fyto_formats_proc,0);
     fyto_formats_window=NULL;
     InvalidateRect(owner,NULL,FALSE);
-    if(result==IDOK)fyto_apply_formats(owner);
 }
 
 // ---------------------------------------------------------------- startup check
 
 // Formats the user claims for fyto but that Windows still opens elsewhere.
-static unsigned fyto_unassociated_count(DWORD mask)
-{
-    unsigned i,n=0;
-    for(i=0;i<FYTO_FORMAT_COUNT;i++)
-        if((mask&(1u<<i)) && !fyto_is_default(fyto_extensions[i]))n++;
-    return n;
-}
-
 // Runs shortly after the window is shown. Windows 10/11 sign the per-user
 // UserChoice key, so no program may switch the default silently; the only legal
 // route is the "Open with" picker, which this prompt sends the user to.
-static void fyto_prompt_associations(HWND owner)
-{
-    DWORD mask;
-    if(!config_assoc_prompt)return;
-    if(fyto_formats_window && IsWindow(fyto_formats_window))return;
-    if(fyto_formats_requested)return;
-    mask=fyto_initial_format_selection();
-    if(!fyto_unassociated_count(mask))return;
-    fyto_format_dialog(owner);
-}

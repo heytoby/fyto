@@ -751,9 +751,7 @@ static void _viv_remember_manual_size(void);
 #define FYTO_NAVIGATION_CONTINUE (WM_APP+28)
 #define FYTO_JPEG_DETAIL_TIMER (WM_APP+29)
 #define FYTO_JPEG_DETAIL_DELAY 180
-// One-shot startup check: are the formats fyto claims actually opened by fyto?
-#define FYTO_ASSOC_PROMPT_TIMER (WM_APP+31)
-#define FYTO_ASSOC_PROMPT_DELAY 1200
+
 static BYTE _viv_fitting_window;
 static void _viv_fit_image_window(void);
 static void _viv_set_view_mode(BOOL standard);
@@ -3618,11 +3616,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 			
 			switch(wParam)
 			{
-                case FYTO_ASSOC_PROMPT_TIMER:
-                    KillTimer(hwnd, FYTO_ASSOC_PROMPT_TIMER);
-                    if (config_assoc_prompt)
-                        fyto_prompt_associations(hwnd);
-                    break;
+
 
                 case FYTO_JPEG_DETAIL_TIMER:
                     if (GetTickCount() - _viv_jpeg_detail_started < FYTO_JPEG_DETAIL_DELAY) break;
@@ -5454,7 +5448,10 @@ static void _viv_process_command_line(wchar_t *cl)
 			
             if (string_icompare_lowercase_ascii(bufstart,"setup") == 0)
             {
+                // The installer launches "/setup" once after installing; show the
+                // default-format dialog a single time from here.
                 setup_window=1;
+                fyto_formats_requested=1;
             }
             else
             if (string_icompare_lowercase_ascii(bufstart,"formats") == 0)
@@ -6175,8 +6172,7 @@ static int _viv_main(int nCmdShow)
 	if (_viv_init(nCmdShow))
 	{
         fyto_first_run(_viv_hwnd);
-        if (config_assoc_prompt)
-            SetTimer(_viv_hwnd, FYTO_ASSOC_PROMPT_TIMER, FYTO_ASSOC_PROMPT_DELAY, NULL);
+
 		for(;;)
 		{
 			// Main message loop:

@@ -33,7 +33,6 @@ static void _config_save_settings_by_location(const wchar_t *path,int is_root);
 static int config_defaults_version = 0;
 int config_show_exif = 0;
 // Ask at startup when the selected image formats are not opened by fyto.
-int config_assoc_prompt = 1;
 int config_middle_click_action = 1; // 0=drag only, 1=toggle fit/100%; drag remains available
 int config_language = 1; // 0 = English, 1 = Simplified Chinese
 BYTE config_appdata = 0; // store settings in %APPDATA%\voidimageviewer or in the same location as voidimageviewer.exe
@@ -109,7 +108,6 @@ static void _config_load_settings_by_location(const wchar_t *path,int is_root)
 	{
         config_defaults_version = ini_get_int(ini,(const utf8_t *)"defaults_version",config_defaults_version);
 		config_show_exif = !!ini_get_int(ini,(const utf8_t *)"show_exif",config_show_exif);
-config_assoc_prompt = !!ini_get_int(ini,(const utf8_t *)"assoc_prompt",config_assoc_prompt);
 		config_middle_click_action = ini_get_int(ini,(const utf8_t *)"middle_click_action",config_middle_click_action) == 1;
 		config_language = ini_get_int(ini,(const utf8_t *)"language",config_language) == 1 ? 1 : 0;
 		config_x = ini_get_int(ini,(const utf8_t *)"x",config_x);
@@ -333,7 +331,6 @@ static void _config_save_settings_by_location(const wchar_t *path,int is_root)
 		{
             _config_write_int(h,"defaults_version",config_defaults_version);
 			_config_write_int(h,"show_exif",config_show_exif);
-			_config_write_int(h,"assoc_prompt",config_assoc_prompt);
 			_config_write_int(h,"middle_click_action",config_middle_click_action);
 			_config_write_int(h,"language",config_language);
 			_config_write_int(h,"x",config_x);
