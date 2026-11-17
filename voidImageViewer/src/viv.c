@@ -7398,7 +7398,7 @@ debug_printf("toggle fullscreen %d\n",!_viv_is_fullscreen);
 		GetWindowRect(_viv_hwnd,&_viv_fullscreen_rect);
 		
 		SetMenu(_viv_hwnd,0);
-		_viv_status_show(config_show_status);
+		_viv_status_show(0);
 		_viv_controls_show(config_show_controls);
 
 		SetWindowPos(_viv_hwnd,HWND_TOP,monitor_rect.left,monitor_rect.top,monitor_rect.right - monitor_rect.left,monitor_rect.bottom - monitor_rect.top,SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOCOPYBITS);
@@ -10488,7 +10488,7 @@ static void _viv_update_frame(const RECT *target)
             if ((style & chrome)!=chrome)SetWindowLong(_viv_hwnd,GWL_STYLE,style|chrome);
         }
         if (GetMenu(_viv_hwnd))SetMenu(_viv_hwnd,NULL);
-        _viv_status_show(config_show_status);
+        _viv_status_show(_viv_is_fullscreen ? 0 : config_show_status);
         _viv_controls_show(config_show_controls);
 
         if (target && IsZoomed(_viv_hwnd))
