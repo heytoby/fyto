@@ -9,7 +9,7 @@ static BOOL title_deferred, title_dirty;
 static fyto_paint_buffer_t title_buffer;
 static RECT title_menu_rects[16];
 static int title_menu_count,title_compact;
-static int title_height(void){return _viv_is_fullscreen?0:fyto_caption_height(os_logical_high);}
+static int title_height(void){return config_show_caption?fyto_caption_height(os_logical_high):0;}
 static int title_border(HWND hwnd){(void)hwnd;return 0;}
 #define FYTO_TITLE_PIN_HIT HTHELP
 static int title_button_width(int width)
@@ -40,19 +40,7 @@ static void title_paint(HWND hwnd)
     COLORREF bg=_viv_exif_background();
 
     if (!config_show_caption) {
-        RECT hidden;
-        HDC d;
         title_dirty = FALSE;
-        if (!GetWindowRect(hwnd,&wr)) return;
-        GetClientRect(hwnd,&cr);
-        ClientToScreen(hwnd,&pt);
-        OffsetRect(&cr,pt.x-wr.left,pt.y-wr.top);
-        d=GetWindowDC(hwnd);
-        if (d) {
-            SetRect(&hidden,0,0,wr.right-wr.left,cr.top);
-            ui_fill(d,&hidden,_viv_exif_background());
-            ReleaseDC(hwnd,d);
-        }
         return;
     }
     if (title_deferred) {
