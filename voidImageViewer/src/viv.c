@@ -1306,6 +1306,15 @@ static void fyto_window_frame(HWND hwnd)
     DwmSetWindowAttribute(hwnd,35,&background,sizeof(background));
     DwmSetWindowAttribute(hwnd,34,&background,sizeof(background));
 }
+static void fyto_window_frame_color(HWND hwnd,COLORREF background)
+{
+    BOOL dark=(GetRValue(background)*299+GetGValue(background)*587+GetBValue(background)*114)<140000;
+    DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));
+    DwmSetWindowAttribute(hwnd,19,&dark,sizeof(dark));
+    DwmSetWindowAttribute(hwnd,35,&background,sizeof(background));
+    DwmSetWindowAttribute(hwnd,34,&background,sizeof(background));
+}
+
 static LRESULT CALLBACK fyto_frame_hook(int code,WPARAM wparam,LPARAM lparam)
 {
     if (code==HCBT_ACTIVATE && wparam)
