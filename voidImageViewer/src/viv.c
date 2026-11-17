@@ -1287,6 +1287,35 @@ HMODULE LoadUnicowsProc(void)
 
 // EXIF reserves a side panel; the original viewer chrome and coordinates are retained.
 static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);}
+// Windows offers no working process-wide switch on this build (SetPreferredAppMode
+// is ignored), so a window's frame can only be set per window, through DWM. This
+// runs once per window when it is activated; it draws nothing itself.
+static void fyto_window_frame(HWND hwnd)
+{
+    BOOL dark=config_theme?FALSE:TRUE;
+    COLORREF background=_viv_exif_background();
+    DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));
+    DwmSetWindowAttribute(hwnd,19,&dark,sizeof(dark));
+    DwmSetWindowAttribute(hwnd,35,&background,sizeof(background));
+    DwmSetWindowAttribute(hwnd,34,&background,sizeof(background));
+}
+static LRESULT CALLBACK fyto_frame_hook(int code,WPARAM wparam,LPARAM lparam)
+{
+    if (code==HCBT_ACTIVATE && wparam)
+    {
+        HWND hwnd=(HWND)wparam;
+        if (hwnd!=_viv_hwnd && (GetWindowLongW(hwnd,GWL_STYLE)&WS_CAPTION))
+            fyto_window_frame(hwnd);
+    }
+    return CallNextHookEx(NULL,code,wparam,lparam);
+}
+static HHOOK fyto_frame_hook_handle;
+static void fyto_frame_hook_install(void)
+{
+    if (!fyto_frame_hook_handle)
+        fyto_frame_hook_handle=SetWindowsHookExW(WH_CBT,fyto_frame_hook,NULL,GetCurrentThreadId());
+}
+
 static void _viv_apply_menu_theme(void);
 static void _viv_apply_menu_theme(void)
 {
@@ -1313,19 +1342,6 @@ static void _viv_apply_theme(void)
     config_fullscreen_background_color_r=GetRValue(c);
     config_fullscreen_background_color_g=GetGValue(c);
     config_fullscreen_background_color_b=GetBValue(c);
-    /* Shell dialogs (open / save / folder / properties) take their frame from the
-       application mode, not from our palette. Declaring the mode here is what makes
-       those windows match the theme; nothing is drawn over them. */
-    {
-        HMODULE uxtheme=LoadLibraryW(L"uxtheme.dll");
-        if (uxtheme)
-        {
-            typedef int (WINAPI *set_app_mode_t)(int);
-            set_app_mode_t set_app_mode=(set_app_mode_t)GetProcAddress(uxtheme,MAKEINTRESOURCEA(135));
-            if (set_app_mode)set_app_mode(config_theme?3:2); /* 2 ForceDark, 3 ForceLight */
-            FreeLibrary(uxtheme);
-        }
-    }
     _viv_apply_menu_theme();
     /* Our title row lives in the non-client area, which Windows caches: without
        an explicit frame redraw the window keeps the previous colour until some
@@ -6223,6 +6239,7 @@ static int _viv_main(int nCmdShow)
 	if (_viv_init(nCmdShow))
 	{
         fyto_first_run(_viv_hwnd);
+        fyto_frame_hook_install();
         /* The first frame must already carry the themed chrome: without this the
            window shows one dark frame before the theme reaches the title row. */
         _viv_apply_theme();
