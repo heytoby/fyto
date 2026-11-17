@@ -884,8 +884,6 @@ static _viv_command_t _viv_commands[] =
 	{"Add Everything Search...",MF_STRING|MF_OWNERDRAW,_VIV_MENU_FILE,VIV_ID_FILE_ADD_EVERYTHING_SEARCH},
 	{0,MF_SEPARATOR,_VIV_MENU_FILE,0},
 	{"Open F&ile Location...",MF_STRING,_VIV_MENU_FILE,VIV_ID_FILE_OPEN_FILE_LOCATION},
-	{"&Edit...",MF_STRING,_VIV_MENU_FILE,VIV_ID_FILE_EDIT},
-	{"Pre&view...",MF_STRING,_VIV_MENU_FILE,VIV_ID_FILE_PREVIEW},
 	{"&Print...",MF_STRING,_VIV_MENU_FILE,VIV_ID_FILE_PRINT},
 	{"Set &Desktop Wallpaper",MF_STRING,_VIV_MENU_FILE,VIV_ID_FILE_SET_DESKTOP_WALLPAPER},
 	{"&Close",MF_STRING|MF_OWNERDRAW,_VIV_MENU_FILE,VIV_ID_FILE_CLOSE}, // this just clears the image.
@@ -6166,6 +6164,21 @@ static void _viv_kill(void)
 #endif	
 }
 
+// The process renders dialogs with a dark frame by default. DwmSetWindowAttribute
+// on activation fixes all of them, including the shell dialogs (open / folder /
+// print) that we never see a WM_INITDIALOG for.
+static HHOOK _viv_caption_hook;
+static LRESULT CALLBACK _viv_caption_proc(int code,WPARAM wparam,LPARAM lparam)
+{
+    if(code==HCBT_ACTIVATE && wparam)
+    {
+        HWND hwnd=(HWND)wparam;
+        if(hwnd!=_viv_hwnd && (GetWindowLongW(hwnd,GWL_STYLE)&WS_CAPTION))
+            fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE));
+    }
+    return CallNextHookEx(NULL,code,wparam,lparam);
+}
+
 static int _viv_main(int nCmdShow)
 {
     if(fyto_is_setup_sample_launch())return 0;
@@ -6175,6 +6188,7 @@ static int _viv_main(int nCmdShow)
 	{
         fyto_first_run(_viv_hwnd);
         _viv_wheel_hook_install();
+        if(!_viv_caption_hook)_viv_caption_hook=SetWindowsHookExW(WH_CBT,_viv_caption_proc,NULL,GetCurrentThreadId());
 
 		for(;;)
 		{
@@ -6204,6 +6218,7 @@ static int _viv_main(int nCmdShow)
 		_viv_kill();
 	}
     _viv_wheel_hook_remove();
+    if(_viv_caption_hook){UnhookWindowsHookEx(_viv_caption_hook);_viv_caption_hook=NULL;}
     fyto_text_shutdown();
 
 	return 0;
@@ -7861,7 +7876,7 @@ static void _viv_delete(int permanently)
 
 static INT_PTR CALLBACK _viv_rename_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{
@@ -8531,7 +8546,7 @@ static void _viv_blank(void)
 
 static INT_PTR CALLBACK _viv_options_general_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{
@@ -8710,7 +8725,7 @@ static void _viv_options_remove_key(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_edit_key_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{
@@ -8818,7 +8833,7 @@ static void _viv_options_edit_key(HWND hwnd,int key_index)
 
 static INT_PTR CALLBACK _viv_options_controls_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{
@@ -8930,7 +8945,7 @@ static INT_PTR CALLBACK _viv_options_controls_proc(HWND hwnd,UINT msg,WPARAM wPa
 }
 static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{
@@ -9100,7 +9115,7 @@ static void _viv_options_update_sheild(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{
@@ -10270,7 +10285,7 @@ static int _viv_is_window_maximized(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_custom_rate_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{
@@ -13508,7 +13523,7 @@ static void _viv_jumpto_open_sel(HWND hwnd)
 			
 static LRESULT CALLBACK _viv_jumpto_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{
@@ -13829,7 +13844,7 @@ static int _viv_nav_compare(const _viv_nav_item_t *a,const _viv_nav_item_t *b)
 
 static INT_PTR CALLBACK _viv_search_everything_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
 
 	switch(msg)
 	{

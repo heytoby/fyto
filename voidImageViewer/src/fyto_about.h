@@ -43,7 +43,6 @@ static void fyto_about_layout(HWND hwnd)
 static INT_PTR CALLBACK fyto_licenses_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
 {
     if(msg==WM_INITDIALOG){
-        fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE));
         HRSRC res=FindResourceW(os_hinstance,MAKEINTRESOURCEW(60012),RT_RCDATA);
         if(res){DWORD n=SizeofResource(os_hinstance,res);HGLOBAL data=LoadResource(os_hinstance,res);char *text=(char *)HeapAlloc(GetProcessHeap(),0,n*2+1);
             if(data && text){const char *src=(const char *)LockResource(data);DWORD i,j=0;for(i=0;i<n;i++){if(src[i]=='\n' && (i==0 || src[i-1]!='\r'))text[j++]='\r';text[j++]=src[i];}text[j]=0;SetDlgItemTextA(hwnd,60012,text);}if(text)HeapFree(GetProcessHeap(),0,text);
@@ -56,7 +55,7 @@ static INT_PTR CALLBACK fyto_licenses_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM l
 static INT_PTR CALLBACK _viv_about_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
 {
     switch(msg){
-        case WM_INITDIALOG:{wchar_t version[96];l10n_dialog(hwnd);fyto_light_caption(hwnd,RGB(255,255,255));
+        case WM_INITDIALOG:{wchar_t version[96];l10n_dialog(hwnd);
             SetWindowTextW(hwnd,config_language?L"关于 fyto":L"About fyto");
             string_printf(version,"fyto %d.%d.%d.%d%s %s",VERSION_MAJOR,VERSION_MINOR,VERSION_REVISION,VERSION_BUILD,VERSION_TYPE,VERSION_TARGET_MACHINE);
             SetDlgItemTextW(hwnd,IDC_ABOUTVERSION,version);

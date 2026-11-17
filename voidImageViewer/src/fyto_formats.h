@@ -1,6 +1,5 @@
 ﻿#include <stdlib.h>
 // Defined in titlebar.h, which is included after this header.
-static void fyto_light_caption(HWND hwnd,COLORREF background);
 #include "format_samples.h"
 
 static const wchar_t *fyto_extensions[]={L".jpg",L".jpeg",L".png",L".webp",L".gif",L".bmp",L".tif",L".tiff",L".ico",L".arw"};
@@ -197,7 +196,6 @@ static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp
     unsigned i;
     if(msg==WM_INITDIALOG){
         fyto_formats_window=hwnd;
-        fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE));
         SetWindowTextW(hwnd,L"fyto · 默认图片浏览器");
         fyto_format_control(hwnd,L"STATIC",L"是否将 fyto 设置为默认图片浏览器？",0,0,12,12,280,16);
         fyto_format_control(hwnd,L"BUTTON",L"全选",WS_TABSTOP,61201,300,10,64,18);
