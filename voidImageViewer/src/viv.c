@@ -2332,7 +2332,8 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 		case VIV_ID_VIEW_EXIF:
 			config_show_exif = !config_show_exif;
 			exif_sync(_viv_hwnd,_viv_current_fd ? _viv_current_fd->cFileName : L"",1);
-            _viv_fit_image_window();
+			/* no window refit: growing the frame by the panel width made the
+			   whole window jump; the panel takes space from the image instead. */
 			_viv_on_size();InvalidateRect(_viv_hwnd,NULL,FALSE);
 			break;
 
@@ -6164,19 +6165,21 @@ static void _viv_kill(void)
 #endif	
 }
 
-// The process renders dialogs with a dark frame by default. DwmSetWindowAttribute
-// on activation fixes all of them, including the shell dialogs (open / folder /
-// print) that we never see a WM_INITDIALOG for.
-static HHOOK _viv_caption_hook;
-static LRESULT CALLBACK _viv_caption_proc(int code,WPARAM wparam,LPARAM lparam)
+// Every popup of this process gets a caption matching the dialog colour.
+// A WinEvent hook is used rather than a thread CBT hook: the shell builds the
+// property sheet and some dialogs on worker threads, which a thread-local CBT
+// hook never sees. The callback only sets DWM attributes, once per window.
+static HWINEVENTHOOK _viv_caption_event;
+static void CALLBACK _viv_caption_callback(HWINEVENTHOOK hook,DWORD event,HWND hwnd,
+    LONG id_object,LONG id_child,DWORD thread,DWORD time)
 {
-    if(code==HCBT_ACTIVATE && wparam)
-    {
-        HWND hwnd=(HWND)wparam;
-        if(hwnd!=_viv_hwnd && (GetWindowLongW(hwnd,GWL_STYLE)&WS_CAPTION))
-            fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE));
-    }
-    return CallNextHookEx(NULL,code,wparam,lparam);
+    DWORD pid=0;
+    (void)hook;(void)event;(void)thread;(void)time;
+    if(!hwnd || id_object!=OBJID_WINDOW || id_child!=CHILDID_SELF)return;
+    GetWindowThreadProcessId(hwnd,&pid);
+    if(pid!=GetCurrentProcessId() || hwnd==_viv_hwnd)return;
+    if(!(GetWindowLongW(hwnd,GWL_STYLE)&WS_CAPTION))return;
+    fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE));
 }
 
 static int _viv_main(int nCmdShow)
@@ -6188,7 +6191,8 @@ static int _viv_main(int nCmdShow)
 	{
         fyto_first_run(_viv_hwnd);
         _viv_wheel_hook_install();
-        if(!_viv_caption_hook)_viv_caption_hook=SetWindowsHookExW(WH_CBT,_viv_caption_proc,NULL,GetCurrentThreadId());
+        if(!_viv_caption_event)_viv_caption_event=SetWinEventHook(EVENT_OBJECT_SHOW,EVENT_OBJECT_SHOW,
+            NULL,_viv_caption_callback,GetCurrentProcessId(),0,WINEVENT_OUTOFCONTEXT);
 
 		for(;;)
 		{
@@ -6218,7 +6222,7 @@ static int _viv_main(int nCmdShow)
 		_viv_kill();
 	}
     _viv_wheel_hook_remove();
-    if(_viv_caption_hook){UnhookWindowsHookEx(_viv_caption_hook);_viv_caption_hook=NULL;}
+    if(_viv_caption_event){UnhookWinEvent(_viv_caption_event);_viv_caption_event=NULL;}
     fyto_text_shutdown();
 
 	return 0;
@@ -8301,10 +8305,61 @@ static void _viv_file_preview(void)
 
 static void _viv_file_print(void)
 {
-	if (*_viv_current_fd->cFileName)
-	{
-		os_shell_execute(_viv_hwnd,_viv_current_fd->cFileName,0,"print",0);
-	}
+    PRINTDLGW pd;
+    DOCINFOW doc;
+    HDC dc,src;
+    HBITMAP bitmap;
+    HGDIOBJ old;
+    int page_w,page_h;
+    int draw_w,draw_h;
+    int x,y;
+
+    if(!_viv_frame_count || !_viv_frames)return;
+    bitmap=_viv_frames[_viv_frame_position].hbitmap;
+    if(!bitmap)return;
+
+    ZeroMemory(&pd,sizeof(pd));
+    pd.lStructSize=sizeof(pd);
+    pd.hwndOwner=_viv_hwnd;
+    pd.Flags=PD_RETURNDC|PD_NOSELECTION|PD_NOPAGENUMS|PD_USEDEVMODECOPIES;
+    if(!PrintDlgW(&pd))return;
+    dc=pd.hDC;
+    if(!dc){
+        if(pd.hDevMode)GlobalFree(pd.hDevMode);
+        if(pd.hDevNames)GlobalFree(pd.hDevNames);
+        return;
+    }
+    src=CreateCompatibleDC(NULL);
+    old=src?SelectObject(src,bitmap):NULL;
+    if(old){
+        page_w=GetDeviceCaps(dc,HORZRES);
+        page_h=GetDeviceCaps(dc,VERTRES);
+        draw_w=page_w;
+        draw_h=MulDiv(draw_w,_viv_image_high,_viv_image_wide);
+        if(draw_h>page_h){
+            draw_h=page_h;
+            draw_w=MulDiv(draw_h,_viv_image_wide,_viv_image_high);
+        }
+        x=(page_w-draw_w)/2;
+        y=(page_h-draw_h)/2;
+        ZeroMemory(&doc,sizeof(doc));
+        doc.cbSize=sizeof(doc);
+        doc.lpszDocName=L"fyto";
+        if(StartDocW(dc,&doc)>0){
+            if(StartPage(dc)>0){
+                SetStretchBltMode(dc,HALFTONE);
+                SetBrushOrgEx(dc,0,0,NULL);
+                StretchBlt(dc,x,y,draw_w,draw_h,src,0,0,_viv_image_wide,_viv_image_high,SRCCOPY);
+                EndPage(dc);
+            }
+            EndDoc(dc);
+        }
+        SelectObject(src,old);
+    }
+    if(src)DeleteDC(src);
+    DeleteDC(dc);
+    if(pd.hDevMode)GlobalFree(pd.hDevMode);
+    if(pd.hDevNames)GlobalFree(pd.hDevNames);
 }
 
 static void _viv_file_set_desktop_wallpaper(void)
@@ -8453,10 +8508,14 @@ static void _viv_open_file_location(void)
 
 static void _viv_properties(void)
 {
-	if (*_viv_current_fd->cFileName)
-	{
-		os_shell_execute(_viv_hwnd,_viv_current_fd->cFileName,0,"properties",0);
-	}
+    const wchar_t *path;
+    if(!*_viv_current_fd->cFileName)return;
+    path=_viv_presented_path();
+    if(!path || !*path)return;
+    /* Runs the shell property sheet in this thread, so the caption hook can
+       style it. ShellExecute "properties" hands it to explorer, which is why
+       that window kept its dark frame. */
+    SHObjectProperties(_viv_hwnd,SHOP_FILEPATH,path,NULL);
 }
 
 static void _viv_doing_cancel(void)
