@@ -188,6 +188,8 @@ static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp
         fyto_format_control(hwnd,L"STATIC",L"",0,61200,12,256,352,26);
         fyto_format_control(hwnd,L"BUTTON",L"保存选择",WS_TABSTOP|BS_DEFPUSHBUTTON,IDOK,190,288,80,22);
         fyto_format_control(hwnd,L"BUTTON",L"暂不设置",WS_TABSTOP,IDCANCEL,282,288,80,22);
+        fyto_format_control(hwnd,L"BUTTON",L"启动时提醒未关联格式",WS_TABSTOP|BS_AUTOCHECKBOX,61203,12,290,170,18);
+        CheckDlgButton(hwnd,61203,config_assoc_prompt?BST_CHECKED:BST_UNCHECKED);
         fyto_refresh_formats(hwnd);SetTimer(hwnd,1,1000,NULL);return TRUE;
     }
     if(msg==WM_TIMER){fyto_refresh_formats(hwnd);return TRUE;}
@@ -198,7 +200,19 @@ static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp
             return TRUE;
         }
         if(id==IDCANCEL){fyto_write_association_value(L"SetupVersion",1);EndDialog(hwnd,0);return TRUE;}
-        if(id==IDOK){if(fyto_save_format_selection(hwnd))EndDialog(hwnd,1);return TRUE;}
+        if(id==IDOK){
+            BOOL was=config_assoc_prompt!=0;
+            config_assoc_prompt=IsDlgButtonChecked(hwnd,61203)==BST_CHECKED?1:0;
+            if(was!=(config_assoc_prompt!=0))config_save_settings(config_appdata);
+            if(!fyto_save_format_selection(hwnd))return TRUE;
+            if(fyto_unassociated_count(fyto_checked_formats(hwnd))>0 &&
+               MessageBoxW(hwnd,L"勾选已保存。\n\nWindows 要求默认程序由你在系统「打开方式」中确认，程序无法静默修改。\n\n是否现在逐个设置？点「是」后，对需要的格式按右侧「设为默认」并选择 fyto。",
+                   L"fyto",MB_YESNO|MB_ICONINFORMATION)==IDYES){
+                fyto_refresh_formats(hwnd);
+                return TRUE;
+            }
+            EndDialog(hwnd,1);return TRUE;
+        }
         if(id>=61100 && id<61100+FYTO_FORMAT_COUNT){
             i=id-61100;CheckDlgButton(hwnd,61000+i,BST_CHECKED);
             if(fyto_save_format_selection(hwnd)){
@@ -224,4 +238,34 @@ static void fyto_format_dialog(HWND owner)
     DialogBoxIndirectParamW(GetModuleHandleW(NULL),&data.dlg,owner,fyto_formats_proc,0);
     fyto_formats_window=NULL;
     InvalidateRect(owner,NULL,FALSE);
+}
+
+// ---------------------------------------------------------------- startup check
+
+// Formats the user claims for fyto but that Windows still opens elsewhere.
+static unsigned fyto_unassociated_count(DWORD mask)
+{
+    unsigned i,n=0;
+    for(i=0;i<FYTO_FORMAT_COUNT;i++)
+        if((mask&(1u<<i)) && !fyto_is_default(fyto_extensions[i]))n++;
+    return n;
+}
+
+// Runs shortly after the window is shown. Windows 10/11 sign the per-user
+// UserChoice key, so no program may switch the default silently; the only legal
+// route is the "Open with" picker, which this prompt sends the user to.
+static void fyto_prompt_associations(HWND owner)
+{
+    DWORD mask;unsigned missing;wchar_t text[512];
+    if(fyto_formats_window && IsWindow(fyto_formats_window))return;
+    if(fyto_formats_requested)return;
+    mask=fyto_initial_format_selection();
+    missing=fyto_unassociated_count(mask);
+    if(!missing)return;
+    wsprintfW(text,
+        L"有 %u 种已勾选的图片格式当前不是由 fyto 打开。\n\n"
+        L"Windows 不允许程序自动更改默认程序，需要在系统的「打开方式」窗口中由你确认一次。\n\n"
+        L"现在去设置吗？",missing);
+    if(MessageBoxW(owner,text,L"fyto · 文件关联",MB_YESNO|MB_ICONINFORMATION|MB_DEFBUTTON1)==IDYES)
+        fyto_format_dialog(owner);
 }
