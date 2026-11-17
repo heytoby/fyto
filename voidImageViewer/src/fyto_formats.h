@@ -97,17 +97,6 @@ static HWND fyto_format_control(HWND owner,const wchar_t *cls,const wchar_t *tex
     child=CreateWindowW(cls,text,WS_CHILD|WS_VISIBLE|style,r.left,r.top,r.right-r.left,r.bottom-r.top,owner,(HMENU)(INT_PTR)id,GetModuleHandleW(NULL),NULL);
     SendMessageW(child,WM_SETFONT,SendMessageW(owner,WM_GETFONT,0,0),TRUE);return child;
 }
-static void fyto_refresh_formats(HWND hwnd)
-{
-    unsigned i;int count=0;wchar_t text[160];
-    for(i=0;i<FYTO_FORMAT_COUNT;i++){
-        BOOL current=fyto_is_default(fyto_extensions[i]);count+=current;
-        SetDlgItemTextW(hwnd,61100+i,current?L"已是默认":L"设为默认");
-        EnableWindow(GetDlgItem(hwnd,61100+i),!current);
-    }
-    wsprintfW(text,L"当前有 %d 种格式默认由 fyto 打开。保存勾选不会替代系统确认。",count);
-    SetDlgItemTextW(hwnd,61200,text);
-}
 static BOOL fyto_is_setup_sample(const wchar_t *filename)
 {
     wchar_t path[STRING_SIZE],marker[STRING_SIZE],name[MAX_PATH];
@@ -124,7 +113,7 @@ static BOOL fyto_is_setup_sample_launch(void)
     p=string_get_word(string_skip_ws(p),word);
     return word[0] && !*string_skip_ws(p) && fyto_is_setup_sample(word);
 }
-static int fyto_open_format_picker(HWND owner,unsigned index)
+static int fyto_open_format_picker(HWND owner,unsigned index,BOOL wait)
 {
     wchar_t path[STRING_SIZE],directory[MAX_PATH];SHELLEXECUTEINFOW info;
     if(index==FYTO_FORMAT_COUNT-1){
@@ -152,11 +141,14 @@ static int fyto_open_format_picker(HWND owner,unsigned index)
         if(!ok){DeleteFileW(path);return -1;}
     }
     // The system's Open With picker provides the user's Always choice.
-    // No protected UserChoice data is written and no Settings page is launched.
+    // No protected UserChoice data is written.
     ZeroMemory(&info,sizeof(info));info.cbSize=sizeof(info);info.hwnd=owner;info.lpVerb=L"openas";info.lpFile=path;
     info.fMask=SEE_MASK_NOASYNC|SEE_MASK_NOCLOSEPROCESS|SEE_MASK_INVOKEIDLIST;info.nShow=SW_SHOWNORMAL;
     if(!ShellExecuteExW(&info))return -1;
-    if(info.hProcess)CloseHandle(info.hProcess);
+    if(info.hProcess){
+        if(wait)WaitForSingleObject(info.hProcess,120000);
+        CloseHandle(info.hProcess);
+    }
     return TRUE;
 }
 static DWORD fyto_initial_format_selection(void)
@@ -168,62 +160,75 @@ static DWORD fyto_initial_format_selection(void)
     }
     return mask&((1u<<FYTO_FORMAT_COUNT)-1);
 }
+static BOOL fyto_offered_format(unsigned index)
+{
+    // .arw stays registered for Open With, but fyto cannot decode Sony RAW,
+    // so it is not offered as a default format.
+    return index + 1 < FYTO_FORMAT_COUNT;
+}
+static BOOL fyto_set_default(HWND owner,unsigned index)
+{
+    if(fyto_is_default(fyto_extensions[index]))return TRUE;
+    if(fyto_open_format_picker(owner,index,TRUE)<0)return FALSE;
+    return fyto_is_default(fyto_extensions[index]);
+}
+// Windows signs UserChoice, so a checked box can only be applied by letting the
+// user confirm that format once in the system Open With dialog.
+static void fyto_apply_formats(HWND owner)
+{
+    DWORD mask=fyto_initial_format_selection();unsigned i;
+    fyto_register_formats();
+    for(i=0;i<FYTO_FORMAT_COUNT;i++){
+        if(!fyto_offered_format(i) || !(mask&(1u<<i)))continue;
+        if(fyto_is_default(fyto_extensions[i]))continue;
+        if(!fyto_set_default(owner,i))break;
+    }
+}
 static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
 {
     unsigned i;
     if(msg==WM_INITDIALOG){
-        DWORD mask=fyto_initial_format_selection();
+        DWORD mask=fyto_initial_format_selection();unsigned n=0;
         fyto_formats_window=hwnd;
-        SetWindowTextW(hwnd,L"将 fyto 设为默认图片浏览器");
-        fyto_format_control(hwnd,L"STATIC",L"可一键勾选全部格式，或自行选择。设置默认时，请在打开方式中选择 fyto 并点击“始终”。",0,0,12,10,352,30);
-        fyto_format_control(hwnd,L"BUTTON",L"一键全选",WS_TABSTOP,61201,12,42,75,18);
-        fyto_format_control(hwnd,L"BUTTON",L"全部取消",WS_TABSTOP,61202,94,42,75,18);
+        SetWindowTextW(hwnd,L"fyto · 默认图片浏览器");
+        fyto_format_control(hwnd,L"STATIC",L"是否将 fyto 设置为默认图片浏览器？",0,0,12,12,280,16);
+        fyto_format_control(hwnd,L"BUTTON",L"全选",WS_TABSTOP,61201,300,10,64,18);
+        fyto_format_control(hwnd,L"STATIC",L"勾选即设置，Windows 会为每个格式确认一次。",0,0,12,34,352,14);
         for(i=0;i<FYTO_FORMAT_COUNT;i++){
-            int x=12+(i%2)*181,y=68+(i/2)*31;
-            fyto_format_control(hwnd,L"BUTTON",fyto_extensions[i],WS_TABSTOP|BS_AUTOCHECKBOX,61000+i,x,y,67,20);
+            int x,y;
+            if(!fyto_offered_format(i))continue;
+            x=12+(int)(n%3)*120;y=58+(int)(n/3)*26;n++;
+            fyto_format_control(hwnd,L"BUTTON",fyto_extensions[i],WS_TABSTOP|BS_AUTOCHECKBOX,61000+i,x,y,112,20);
             CheckDlgButton(hwnd,61000+i,(mask&(1u<<i))?BST_CHECKED:BST_UNCHECKED);
-            fyto_format_control(hwnd,L"BUTTON",L"设为默认",WS_TABSTOP,61100+i,x+70,y,92,20);
         }
-        fyto_format_control(hwnd,L"STATIC",L"勾选会保留到下次打开和升级安装。取消勾选不会更改现有默认程序。",0,0,12,228,352,26);
-        fyto_format_control(hwnd,L"STATIC",L"",0,61200,12,256,352,26);
-        fyto_format_control(hwnd,L"BUTTON",L"保存选择",WS_TABSTOP|BS_DEFPUSHBUTTON,IDOK,190,288,80,22);
-        fyto_format_control(hwnd,L"BUTTON",L"暂不设置",WS_TABSTOP,IDCANCEL,282,288,80,22);
-        fyto_format_control(hwnd,L"BUTTON",L"启动时提醒未关联格式",WS_TABSTOP|BS_AUTOCHECKBOX,61203,12,290,170,18);
+        fyto_format_control(hwnd,L"BUTTON",L"启动时提醒",WS_TABSTOP|BS_AUTOCHECKBOX,61203,12,140,140,18);
         CheckDlgButton(hwnd,61203,config_assoc_prompt?BST_CHECKED:BST_UNCHECKED);
-        fyto_refresh_formats(hwnd);SetTimer(hwnd,1,1000,NULL);return TRUE;
+        fyto_format_control(hwnd,L"BUTTON",L"确认",WS_TABSTOP|BS_DEFPUSHBUTTON,IDOK,196,138,80,22);
+        fyto_format_control(hwnd,L"BUTTON",L"取消",WS_TABSTOP,IDCANCEL,286,138,80,22);
+        return TRUE;
     }
-    if(msg==WM_TIMER){fyto_refresh_formats(hwnd);return TRUE;}
     if(msg==WM_COMMAND){
         int id=LOWORD(wp);
-        if(id==61201 || id==61202){
-            for(i=0;i<FYTO_FORMAT_COUNT;i++)CheckDlgButton(hwnd,61000+i,id==61201?BST_CHECKED:BST_UNCHECKED);
+        if(id==61201){
+            for(i=0;i<FYTO_FORMAT_COUNT;i++)
+                if(fyto_offered_format(i))CheckDlgButton(hwnd,61000+i,BST_CHECKED);
             return TRUE;
         }
-        if(id==IDCANCEL){fyto_write_association_value(L"SetupVersion",1);EndDialog(hwnd,0);return TRUE;}
-        if(id==IDOK){
+        if(id==IDOK || id==IDCANCEL){
             BOOL was=config_assoc_prompt!=0;
             config_assoc_prompt=IsDlgButtonChecked(hwnd,61203)==BST_CHECKED?1:0;
             if(was!=(config_assoc_prompt!=0))config_save_settings(config_appdata);
-            if(!fyto_save_format_selection(hwnd))return TRUE;
-            if(fyto_unassociated_count(fyto_checked_formats(hwnd))>0 &&
-               MessageBoxW(hwnd,L"勾选已保存。\n\nWindows 要求默认程序由你在系统「打开方式」中确认，程序无法静默修改。\n\n是否现在逐个设置？点「是」后，对需要的格式按右侧「设为默认」并选择 fyto。",
-                   L"fyto",MB_YESNO|MB_ICONINFORMATION)==IDYES){
-                fyto_refresh_formats(hwnd);
-                return TRUE;
+            if(id==IDOK){
+                if(!fyto_save_format_selection(hwnd))return TRUE;
+                EndDialog(hwnd,1);
+            }else{
+                fyto_write_association_value(L"SetupVersion",1);
+                EndDialog(hwnd,0);
             }
-            EndDialog(hwnd,1);return TRUE;
-        }
-        if(id>=61100 && id<61100+FYTO_FORMAT_COUNT){
-            i=id-61100;CheckDlgButton(hwnd,61000+i,BST_CHECKED);
-            if(fyto_save_format_selection(hwnd)){
-                if(!fyto_register_formats())MessageBoxW(hwnd,L"未能注册打开方式，请检查当前用户的写入权限。",L"fyto",MB_OK|MB_ICONERROR);
-                else if(fyto_open_format_picker(hwnd,i)<0)MessageBoxW(hwnd,L"未能打开格式选择，请重试。",L"fyto",MB_OK|MB_ICONERROR);
-            }
-            fyto_refresh_formats(hwnd);return TRUE;
+            return TRUE;
         }
     }
     if(msg==WM_CLOSE){fyto_write_association_value(L"SetupVersion",1);EndDialog(hwnd,0);return TRUE;}
-    if(msg==WM_DESTROY){KillTimer(hwnd,1);return TRUE;}
     return FALSE;
 }
 static void fyto_format_dialog(HWND owner)
@@ -231,13 +236,14 @@ static void fyto_format_dialog(HWND owner)
 #pragma pack(push,2)
     struct {DLGTEMPLATE dlg;WORD menu,cls,title,point;wchar_t font[9];} data;
 #pragma pack(pop)
+    INT_PTR result;
     if(fyto_formats_window && IsWindow(fyto_formats_window)){SetForegroundWindow(fyto_formats_window);return;}
-    ZeroMemory(&data,sizeof(data));data.dlg.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME|DS_CENTER|DS_SETFONT;data.dlg.cx=376;data.dlg.cy=324;
+    ZeroMemory(&data,sizeof(data));data.dlg.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME|DS_CENTER|DS_SETFONT;data.dlg.cx=376;data.dlg.cy=172;
     data.point=9;lstrcpyW(data.font,L"Microsoft YaHei UI");
-    // Mark only inside the displayed dialog, allowing a retry after creation failure.
-    DialogBoxIndirectParamW(GetModuleHandleW(NULL),&data.dlg,owner,fyto_formats_proc,0);
+    result=DialogBoxIndirectParamW(GetModuleHandleW(NULL),&data.dlg,owner,fyto_formats_proc,0);
     fyto_formats_window=NULL;
     InvalidateRect(owner,NULL,FALSE);
+    if(result==IDOK)fyto_apply_formats(owner);
 }
 
 // ---------------------------------------------------------------- startup check
@@ -256,16 +262,11 @@ static unsigned fyto_unassociated_count(DWORD mask)
 // route is the "Open with" picker, which this prompt sends the user to.
 static void fyto_prompt_associations(HWND owner)
 {
-    DWORD mask;unsigned missing;wchar_t text[512];
+    DWORD mask;
+    if(!config_assoc_prompt)return;
     if(fyto_formats_window && IsWindow(fyto_formats_window))return;
     if(fyto_formats_requested)return;
     mask=fyto_initial_format_selection();
-    missing=fyto_unassociated_count(mask);
-    if(!missing)return;
-    wsprintfW(text,
-        L"有 %u 种已勾选的图片格式当前不是由 fyto 打开。\n\n"
-        L"Windows 不允许程序自动更改默认程序，需要在系统的「打开方式」窗口中由你确认一次。\n\n"
-        L"现在去设置吗？",missing);
-    if(MessageBoxW(owner,text,L"fyto · 文件关联",MB_YESNO|MB_ICONINFORMATION|MB_DEFBUTTON1)==IDYES)
-        fyto_format_dialog(owner);
+    if(!fyto_unassociated_count(mask))return;
+    fyto_format_dialog(owner);
 }
