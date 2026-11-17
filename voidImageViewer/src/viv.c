@@ -9180,15 +9180,15 @@ static INT_PTR CALLBACK _viv_options_about_proc(HWND hwnd,UINT msg,WPARAM wParam
 			switch(LOWORD(wParam))
 			{
 				case IDC_ABOUTPAGE_UPDATE:
-					fyto_check_updates(hwnd);
+					fyto_check_updates(GetParent(hwnd));
 					break;
 
 				case IDC_ABOUTPAGE_LICENSES:
-					DialogBoxParamW(os_hinstance,MAKEINTRESOURCEW(60011),hwnd,fyto_licenses_proc,0);
+					DialogBoxParamW(os_hinstance,MAKEINTRESOURCEW(60011),GetParent(hwnd),fyto_licenses_proc,0);
 					break;
 
 				case IDC_ABOUTPAGE_ABOUT:
-					DialogBox(os_hinstance,MAKEINTRESOURCE(IDD_ABOUT),hwnd,_viv_about_proc);
+					DialogBox(os_hinstance,MAKEINTRESOURCE(IDD_ABOUT),GetParent(hwnd),_viv_about_proc);
 					break;
 			}
 
