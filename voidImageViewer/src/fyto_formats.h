@@ -1,6 +1,7 @@
 ﻿#include <stdlib.h>
 // Defined in titlebar.h, which is included after this header.
 static void fyto_light_caption(HWND hwnd);
+static void fyto_light_caption_color(HWND hwnd,COLORREF background);
 #include "format_samples.h"
 
 static const wchar_t *fyto_extensions[]={L".jpg",L".jpeg",L".png",L".webp",L".gif",L".bmp",L".tif",L".tiff",L".ico",L".arw"};

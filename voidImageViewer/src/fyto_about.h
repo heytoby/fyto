@@ -55,7 +55,7 @@ static INT_PTR CALLBACK fyto_licenses_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM l
 static INT_PTR CALLBACK _viv_about_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
 {
     switch(msg){
-        case WM_INITDIALOG:{wchar_t version[96];l10n_dialog(hwnd);fyto_light_caption(hwnd);
+        case WM_INITDIALOG:{wchar_t version[96];l10n_dialog(hwnd);fyto_light_caption_color(hwnd,RGB(255,255,255));
             SetWindowTextW(hwnd,config_language?L"关于 fyto":L"About fyto");
             string_printf(version,"fyto %d.%d.%d.%d%s %s",VERSION_MAJOR,VERSION_MINOR,VERSION_REVISION,VERSION_BUILD,VERSION_TYPE,VERSION_TARGET_MACHINE);
             SetDlgItemTextW(hwnd,IDC_ABOUTVERSION,version);
