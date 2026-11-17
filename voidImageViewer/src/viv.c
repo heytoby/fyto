@@ -11858,307 +11858,112 @@ static void _viv_controls_show(int show)
 	_viv_on_size();
 }
 
+static const wchar_t *_viv_status_format_name(void)
+{
+	const wchar_t *ext;
+	
+	ext = _viv_frame_fd ? string_get_extension(_viv_frame_fd->cFileName) : L"";
+	
+	if ((!lstrcmpiW(ext,L"jpg")) || (!lstrcmpiW(ext,L"jpeg"))) return L"JPEG";
+	if (!lstrcmpiW(ext,L"png")) return L"PNG";
+	if (!lstrcmpiW(ext,L"gif")) return L"GIF";
+	if (!lstrcmpiW(ext,L"bmp")) return L"BMP";
+	if (!lstrcmpiW(ext,L"ico")) return L"ICO";
+	if ((!lstrcmpiW(ext,L"tif")) || (!lstrcmpiW(ext,L"tiff"))) return L"TIFF";
+	if (!lstrcmpiW(ext,L"webp")) return L"WEBP";
+	
+	return L"";
+}
+
 static void _viv_status_update(void)
 {
 	if (_viv_status_hwnd)
 	{
-		int part_array[6];
-		RECT rect;
-		wchar_t widebuf[STRING_SIZE];
-		wchar_t highbuf[STRING_SIZE];
-		wchar_t dimension_buf[STRING_SIZE];
-		wchar_t frame_buf[STRING_SIZE];
-		wchar_t pixel_pos_buf[STRING_SIZE];
-		wchar_t pixel_rgb_buf[STRING_SIZE];
-		const wchar_t *preload_buf;
-		HDC hdc;
-		int dimension_wide;
-		int frame_wide;
-		int preload_wide;
-		int pixel_pos_wide;
-		int pixel_rgb_wide;
-		int minwide;
+		int part_array[1];
+		wchar_t text[STRING_SIZE];
+		wchar_t buf[STRING_SIZE];
+		wchar_t size_text[STRING_SIZE];
 		
-		GetClientRect(_viv_status_hwnd,&rect);
+		// One part across the whole footer: format / resolution / size.
+		part_array[0] = -1;
+		SendMessage(_viv_status_hwnd,SB_SETPARTS,1,(LPARAM)part_array);
 		
-		preload_buf = 0;
-		*pixel_pos_buf = 0;
-		*pixel_rgb_buf = 0;
+		*text = 0;
 		
+		if (_viv_status_temp_text)
+		{
+			string_copy(text,_viv_status_temp_text);
+		}
+		else
+		if ((_viv_load_image_thread) && ((!_viv_load_is_preload) || (_viv_should_activate_preload_on_load)))
+		{
+			string_copy(text,l10n_wide(L"Loading..."));
+		}
+		else
+		if (_viv_file_not_found)
+		{
+			string_copy(text,l10n_wide(L"File not found."));
+		}
+		else
+		if (_viv_load_failed)
+		{
+			string_copy(text,l10n_wide(L"Failed to load image."));
+		}
+		else
 		if ((_viv_image_wide) && (_viv_image_high))
 		{
-			string_format_number(widebuf,_viv_image_wide);
-			string_format_number(highbuf,_viv_image_high);
-		
-			string_copy(dimension_buf,widebuf);
-			string_cat_utf8(dimension_buf,(const utf8_t *)" x ");
-			string_cat(dimension_buf,highbuf);
-		}
-		else
-		{
-			string_copy_utf8(dimension_buf,(const utf8_t *)"");
-		}
-
-		if (*_viv_frame_fd->cFileName)
-		{
-			LARGE_INTEGER size;
+			const wchar_t *format;
 			
-			size.HighPart = _viv_frame_fd->nFileSizeHigh;
-			size.LowPart = _viv_frame_fd->nFileSizeLow;
+			format = _viv_status_format_name();
 			
-			if (size.QuadPart)
+			if (*format)
 			{
-				NUMBERFMT numberfmt;
+				string_cat(text,format);
+				string_cat_utf8(text,(const utf8_t *)" \xc2\xb7 ");
+			}
+			
+			string_format_number(buf,_viv_image_wide);
+			string_cat(text,buf);
+			string_cat_utf8(text,(const utf8_t *)" \xc3\x97 ");
+			string_format_number(buf,_viv_image_high);
+			string_cat(text,buf);
+			
+			if ((_viv_frame_fd) && (*_viv_frame_fd->cFileName))
+			{
+				LARGE_INTEGER size;
 				
-				if (*dimension_buf)
+				size.HighPart = _viv_frame_fd->nFileSizeHigh;
+				size.LowPart = _viv_frame_fd->nFileSizeLow;
+				
+				if (size.QuadPart)
 				{
-					string_cat_utf8(dimension_buf," ");
-				}
-				
-				string_cat_utf8(dimension_buf,"(");
-				string_format_number(widebuf,(size.QuadPart + 1023) / 1024);
-				
-				numberfmt.NumDigits = 0;
-				numberfmt.LeadingZero = 0;
-				numberfmt.Grouping = 3;
-				numberfmt.lpThousandSep = L",";
-				numberfmt.lpDecimalSep = L".";
-				numberfmt.NegativeOrder = 0;
-	    
-    			GetNumberFormat(LOCALE_USER_DEFAULT,0,widebuf,&numberfmt,highbuf,STRING_SIZE);
-				
-				string_cat(dimension_buf,highbuf);
-				string_cat_utf8(dimension_buf," KB)");
-			}
-		}
-		
-		if (_viv_frame_count > 1)
-		{
-			int frame_pos;
-			string_format_number(highbuf,_viv_frame_count);
-
-			string_copy_utf8(frame_buf,(const utf8_t *)"");
-			
-			if (config_frame_minus)
-			{
-				frame_pos = _viv_frame_count - (_viv_frame_position);
-				string_cat_utf8(frame_buf,(const utf8_t *)"- ");
-			}
-			else
-			{
-				frame_pos = _viv_frame_position + 1;
-			}
-
-			string_format_number(widebuf,frame_pos);
-			
-			string_cat(frame_buf,widebuf);
-			string_cat_utf8(frame_buf,(const utf8_t *)" / ");
-			string_cat(frame_buf,highbuf);
-		}
-		else
-		{
-			string_copy_utf8(frame_buf,(const utf8_t *)"");
-		}
-		
-		// this is just noise..
-		
-		if ((_viv_load_is_preload) && (_viv_preload_state == 0) && (!_viv_should_activate_preload_on_load) && (!_viv_load_image_terminate) && (!_viv_preload_frame_loaded_count))
-		{
-			preload_buf = l10n_wide(L"PRELOAD");
-		}
-
-		if (config_pixel_info)
-		{
-			if ((_viv_src_pixel_x >= 0) && (_viv_src_pixel_y >= 0))
-			{		
-				string_printf(pixel_pos_buf,l10n_text("POS: %d,%d"),_viv_src_pixel_x,_viv_src_pixel_y);
-				string_printf(pixel_rgb_buf,"RGB: %d,%d,%d",_viv_src_pixel_r,_viv_src_pixel_g,_viv_src_pixel_b);
-			}
-		}
-		
-		dimension_wide = 0;
-		frame_wide = 0;
-		preload_wide = 0;
-		pixel_pos_wide = 0;
-		pixel_rgb_wide = 0;
-		minwide = (72 * os_logical_wide) / 96;
-
-		hdc = GetDC(_viv_status_hwnd);
-		if (hdc)
-		{
-			HFONT hfont;
-			
-			hfont = (HFONT)SendMessage(_viv_status_hwnd,WM_GETFONT,0,0);
-			if (hfont)
-			{
-				SIZE size;
-				HGDIOBJ last_font;
-				
-				last_font = SelectObject(hdc,hfont);
-				
-				if (GetTextExtentPoint32(hdc,dimension_buf,string_length(dimension_buf),&size))
-				{
-					dimension_wide = size.cx + GetSystemMetrics(SM_CXEDGE) * 5;
+					NUMBERFMT numberfmt;
 					
-					if (dimension_wide < minwide)
+					string_format_number(buf,(size.QuadPart + 1023) / 1024);
+					
+					numberfmt.NumDigits = 0;
+					numberfmt.LeadingZero = 0;
+					numberfmt.Grouping = 3;
+					numberfmt.lpThousandSep = L",";
+					numberfmt.lpDecimalSep = L".";
+					numberfmt.NegativeOrder = 0;
+					
+					if (GetNumberFormat(LOCALE_USER_DEFAULT,0,buf,&numberfmt,size_text,STRING_SIZE))
 					{
-						dimension_wide = minwide;
+						string_cat_utf8(text,(const utf8_t *)" \xc2\xb7 ");
+						string_cat(text,size_text);
+						string_cat_utf8(text,(const utf8_t *)" KB");
 					}
 				}
-
-				if (*frame_buf)
-				{
-					if (GetTextExtentPoint32(hdc,frame_buf,string_length(frame_buf),&size))
-					{
-						frame_wide = size.cx + GetSystemMetrics(SM_CXEDGE) * 5;
-						
-						if (frame_wide < minwide)
-						{
-							frame_wide = minwide;
-						}
-					}
-				}
-
-				if (preload_buf)
-				{
-					if (GetTextExtentPoint32(hdc,preload_buf,string_length(preload_buf),&size))
-					{
-						preload_wide = size.cx + GetSystemMetrics(SM_CXEDGE) * 5;
-					}
-				}
-
-				if (*pixel_pos_buf)
-				{
-					if (GetTextExtentPoint32(hdc,pixel_pos_buf,string_length(pixel_pos_buf),&size))
-					{
-						pixel_pos_wide = size.cx + GetSystemMetrics(SM_CXEDGE) * 5;
-					}
-				}
-
-				if (*pixel_rgb_buf)
-				{
-					if (GetTextExtentPoint32(hdc,pixel_rgb_buf,string_length(pixel_rgb_buf),&size))
-					{
-						pixel_rgb_wide = size.cx + GetSystemMetrics(SM_CXEDGE) * 5;
-					}
-				}
-
-				SelectObject(hdc,last_font);
 			}
-			
-			ReleaseDC(_viv_status_hwnd,hdc);
 		}
-		
-		// add size box
-		dimension_wide += GetSystemMetrics(SM_CXVSCROLL) + GetSystemMetrics(SM_CXBORDER);
-		
+		else
+		if (_viv_is_slideshow)
 		{
-			int parti;
-			int part_wide;
-			
-			parti = 0;
-			part_wide = (rect.right - rect.left) - dimension_wide - frame_wide - preload_wide - pixel_pos_wide - pixel_rgb_wide;
-
-			part_array[parti] = part_wide;
-			if (part_array[parti] < 0)
-			{
-				part_array[parti] = 0;
-			}
-			parti++;
-		
-			if (preload_buf)
-			{
-				part_wide += preload_wide;
-				part_array[parti] = part_wide;
-				parti++;
-			}
-			
-			if (pixel_pos_buf)
-			{
-				part_wide += pixel_pos_wide;
-				part_array[parti] = part_wide;
-				parti++;
-			}
-			
-			if (pixel_rgb_buf)
-			{
-				part_wide += pixel_rgb_wide;
-				part_array[parti] = part_wide;
-				parti++;
-			}
-			
-			part_wide += frame_wide;
-			part_array[parti] = part_wide;
-			parti++;
-			
-			part_array[parti] = -1;
-			parti++;
-			
-			SendMessage(_viv_status_hwnd,SB_SETPARTS,parti,(LPARAM)part_array);
-		}
-
-		{
-			wchar_t *text;
-			
-			text =  L"";
-			
-			if (_viv_status_temp_text)
-			{
-				text = _viv_status_temp_text;
-			}
-			else
-			if ((_viv_load_image_thread) && ((!_viv_load_is_preload) || (_viv_should_activate_preload_on_load)))
-			{	
-				text =  l10n_wide(L"Loading...");
-			}
-			else
-			if (_viv_file_not_found)
-			{
-				text = l10n_wide(L"File not found.");
-			}
-			else
-			if (_viv_load_failed)
-			{
-				text = l10n_wide(L"Failed to load image.");
-			}
-			else
-			if (_viv_is_slideshow)
-			{
-				text =  l10n_wide(L"Slideshow playing");
-			}
-		
-			_viv_status_set(0,text);
+			string_copy(text,l10n_wide(L"Slideshow playing"));
 		}
 		
-		{
-			int parti;
-			
-			parti = 1;
-			
-			if (preload_buf)
-			{
-				_viv_status_set(parti,preload_buf);
-				parti++;
-			}
-			
-			if (pixel_pos_buf)
-			{
-				_viv_status_set(parti,pixel_pos_buf);
-				parti++;
-			}
-			
-			if (pixel_rgb_buf)
-			{
-				_viv_status_set(parti,pixel_rgb_buf);
-				parti++;
-			}
-			
-			_viv_status_set(parti,frame_buf);
-			parti++;
-			
-			_viv_status_set(parti,dimension_buf);
-			parti++;
-		}
+		_viv_status_set(0,text);
 	}
 }
 
@@ -12166,6 +11971,7 @@ static void _viv_status_set(int part,const wchar_t *text)
 {
 	wchar_t oldtext[STRING_SIZE];
 	
+	*oldtext = 0;
 	SendMessage(_viv_status_hwnd,SB_GETTEXTW,(WPARAM)part,(LPARAM)oldtext);
 	
 	if (string_compare(oldtext,text) != 0)
@@ -12241,7 +12047,7 @@ static LRESULT CALLBACK _viv_status_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM
 	switch (msg) 
 	{
  case WM_ERASEBKGND:return 1;
- case WM_PAINT:{PAINTSTRUCT ps;RECT r;HGDIOBJ old;HFONT ui_font=fyto_caption_create_font(os_logical_high);int i,count;BeginPaint(hwnd,&ps);GetClientRect(hwnd,&r);ui_fill(ps.hdc,&r,_viv_exif_background());SetTextColor(ps.hdc,ui_text(_viv_exif_background()));SetBkMode(ps.hdc,TRANSPARENT);old=SelectObject(ps.hdc,ui_font?ui_font:GetStockObject(DEFAULT_GUI_FONT));count=(int)SendMessage(hwnd,SB_GETPARTS,0,0);for(i=0;i<count;i++){wchar_t text[STRING_SIZE];text[0]=0;SendMessage(hwnd,SB_GETRECT,i,(LPARAM)&r);SendMessageW(hwnd,SB_GETTEXTW,i,(LPARAM)text);r.left+=4;r.right-=4;DrawTextW(ps.hdc,text,-1,&r,DT_LEFT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);}SelectObject(ps.hdc,old);if(ui_font)DeleteObject(ui_font);EndPaint(hwnd,&ps);return 0;}
+ case WM_PAINT:{PAINTSTRUCT ps;RECT r;HGDIOBJ old;HFONT ui_font=fyto_caption_create_font(os_logical_high);int i,count;BeginPaint(hwnd,&ps);GetClientRect(hwnd,&r);ui_fill(ps.hdc,&r,_viv_exif_background());SetTextColor(ps.hdc,ui_text(_viv_exif_background()));SetBkMode(ps.hdc,TRANSPARENT);old=SelectObject(ps.hdc,ui_font?ui_font:GetStockObject(DEFAULT_GUI_FONT));count=(int)SendMessage(hwnd,SB_GETPARTS,0,0);for(i=0;i<count;i++){wchar_t text[STRING_SIZE];text[0]=0;SendMessage(hwnd,SB_GETRECT,i,(LPARAM)&r);SendMessageW(hwnd,SB_GETTEXTW,i,(LPARAM)text);r.left+=4;r.right-=4;DrawTextW(ps.hdc,text,-1,&r,DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS);}SelectObject(ps.hdc,old);if(ui_font)DeleteObject(ui_font);EndPaint(hwnd,&ps);return 0;}
 	
 		case WM_LBUTTONDOWN:
 		
