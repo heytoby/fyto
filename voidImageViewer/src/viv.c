@@ -1337,13 +1337,19 @@ static void _viv_mipmap_free(_viv_mipmap_t *mipmap)
 // delay this until after the new image is shown.
 // we add the clear to a queue which is cleared with _viv_process_pending_clear.
 // _viv_process_pending_clear should be called after the new frame is shown.
-// Allow a small full bitmap on each side of the current image.
+// Bytes a decoded neighbour may occupy: the full frame plus its mipmap chain,
+// 4 bytes per pixel. The old 3 MP pixel cap was smaller than any modern photo,
+// so _viv_cache_image_fits() rejected every image above 3 MP and both
+// "preload next" and "cache last" silently did nothing; every navigation then
+// paid a cold decode. 224 MB holds a 24 MP chain (32 M pixels, 128 MB).
+#define FYTO_NEIGHBOR_BYTES (224ull * 1024 * 1024)
+// Preview pixels kept for an image that is too large to cache whole.
 #define FYTO_NEIGHBOR_PIXELS (3ull * 1024 * 1024)
 static BOOL _viv_cache_image_fits(UINT wide, UINT high, UINT frames)
 {
     UINT64 pixels;
     if (!wide || !high || !frames) return FALSE;
-    pixels = FYTO_NEIGHBOR_PIXELS / frames;
+    pixels = FYTO_NEIGHBOR_BYTES / 4 / frames;
     for (;;)
     {
         UINT64 level = (UINT64)wide * high;
@@ -1809,10 +1815,16 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
         job->use_icm = config_icm;
         job->use_orientation = config_orientation;
         job->prefetch = is_preload;
-        job->defer_jpeg_detail = config_preload_next && !_viv_is_slideshow;
+        // Decode the selected image once. The deferred-detail path used to end
+        // the job after a quarter-scale preview, wait for a 180 ms timer and
+        // then re-open the file for a full decode: two file reads, two decodes
+        // and a hard latency floor on every single image. The preview below is
+        // still posted while this same job continues to the full frame, so the
+        // user gets a progressive first paint without paying for it twice.
+        job->defer_jpeg_detail = FALSE;
         if (is_preload)
         {
-            const UINT64 budget = 224ull * 1024 * 1024 / 4;
+            const UINT64 budget = FYTO_NEIGHBOR_BYTES / 4;
             UINT64 pixels = (UINT64)_viv_image_wide * _viv_image_high;
             UINT frames = max(1, _viv_frame_count);
             job->prefetch_pixels = pixels <= budget / frames ? budget - pixels * frames : 0;
