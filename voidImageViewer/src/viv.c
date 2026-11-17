@@ -11689,7 +11689,6 @@ static void _viv_reply_clear_all(void)
 
 static void _viv_status_show(int show)
 {
-    show=0;
 	if (show)
 	{
 		if (!_viv_status_hwnd)
