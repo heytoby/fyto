@@ -8,7 +8,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <AdditionalDependencies>$(MSBuildThisFileDirectory)build\jpeg\Release\jpeg-static.lib;msimg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(MSBuildThisFileDirectory)build\jpeg\Release\jpeg-static.lib;msimg32.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)build-support;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

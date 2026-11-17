@@ -24,37 +24,11 @@ static void title_release_fonts(void)
 }
 // The viewer keeps its dark canvas, but its dialogs should not inherit the
 // system dark title bar (they read as a black band above the sheet).
-static void fyto_light_caption_color(HWND hwnd,COLORREF background)
+static void fyto_light_caption(HWND hwnd,COLORREF background)
 {
-    HMODULE dwm=LoadLibraryW(L"dwmapi.dll");
-    if(dwm)
-    {
-        typedef HRESULT (WINAPI *set_attr_t)(HWND,DWORD,LPCVOID,DWORD);
-        typedef HRESULT (WINAPI *flush_t)(void);
-        set_attr_t set_attr=(set_attr_t)GetProcAddress(dwm,"DwmSetWindowAttribute");
-        flush_t flush=(flush_t)GetProcAddress(dwm,"DwmFlush");
-        if(set_attr)
-        {
-            BOOL off=FALSE;
-            COLORREF text=RGB(32,32,32);
-            set_attr(hwnd,20,&off,sizeof(off));        /* immersive dark mode off */
-            set_attr(hwnd,19,&off,sizeof(off));        /* same, before 20H1 */
-            set_attr(hwnd,35,&background,sizeof(background)); /* caption colour */
-            set_attr(hwnd,36,&text,sizeof(text));      /* caption text colour */
-            set_attr(hwnd,34,&background,sizeof(background)); /* border colour */
-        }
-        SetWindowPos(hwnd,NULL,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
-        /* DWM applies the attributes lazily: flush or the first frame keeps the
-           old dark caption until something else repaints the window. */
-        if(flush)flush();
-        FreeLibrary(dwm);
-    }
-    else
-        SetWindowPos(hwnd,NULL,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
-}
-static void fyto_light_caption(HWND hwnd)
-{
-    fyto_light_caption_color(hwnd,GetSysColor(COLOR_BTNFACE));
+    BOOL dark=FALSE;
+    DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));      /* not a dark frame */
+    DwmSetWindowAttribute(hwnd,35,&background,sizeof(background));
 }
 static void title_paint(HWND hwnd)
 {

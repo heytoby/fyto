@@ -1034,10 +1034,8 @@ static _viv_command_t _viv_commands[] =
 
 	{"&Help",MF_POPUP,_VIV_MENU_ROOT,_VIV_MENU_HELP},
 	{"&Help",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_HELP},
-	{"&Command Line Options",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_COMMAND_LINE_OPTIONS},
 	{0,MF_SEPARATOR,_VIV_MENU_HELP,0},
 	{"Home &Page",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_WEBSITE},
-	{"&Donate",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_DONATE},
 	{0,MF_SEPARATOR,_VIV_MENU_HELP,0},
 	{"图片格式关联...",MF_STRING,_VIV_MENU_HELP,60003},
 	{"检查更新...",MF_STRING,_VIV_MENU_HELP,60004},
@@ -6205,10 +6203,12 @@ static int _viv_main(int nCmdShow)
 		
 		_viv_kill();
 	}
+    _viv_wheel_hook_remove();
     fyto_text_shutdown();
 
 	return 0;
 }
+
 
 // Mouse wheel anywhere on the monitor while this window is the foreground one.
 // WM_MOUSEWHEEL alone only arrives when the cursor is over the window.
@@ -7861,7 +7861,7 @@ static void _viv_delete(int permanently)
 
 static INT_PTR CALLBACK _viv_rename_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -8531,7 +8531,7 @@ static void _viv_blank(void)
 
 static INT_PTR CALLBACK _viv_options_general_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -8710,7 +8710,7 @@ static void _viv_options_remove_key(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_edit_key_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -8818,7 +8818,7 @@ static void _viv_options_edit_key(HWND hwnd,int key_index)
 
 static INT_PTR CALLBACK _viv_options_controls_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -8930,7 +8930,7 @@ static INT_PTR CALLBACK _viv_options_controls_proc(HWND hwnd,UINT msg,WPARAM wPa
 }
 static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -9100,7 +9100,7 @@ static void _viv_options_update_sheild(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd); }
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -10270,7 +10270,7 @@ static int _viv_is_window_maximized(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_custom_rate_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -13508,7 +13508,7 @@ static void _viv_jumpto_open_sel(HWND hwnd)
 			
 static LRESULT CALLBACK _viv_jumpto_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -13829,7 +13829,7 @@ static int _viv_nav_compare(const _viv_nav_item_t *a,const _viv_nav_item_t *b)
 
 static INT_PTR CALLBACK _viv_search_everything_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE)); }
 
 	switch(msg)
 	{
@@ -15311,9 +15311,6 @@ static void _viv_set_view_mode(BOOL standard)
         screen_filling=fyto_window_needs_drag_restore(_viv_hwnd);
     }
 
-    // Freeze painting while the frame moves/resizes, otherwise an intermediate
-    // repaint shows the dark canvas for a frame and the toggle flickers.
-    SendMessageW(_viv_hwnd,WM_SETREDRAW,FALSE,0);
     config_show_menu=standard;
     config_show_caption=standard;
     config_show_thickframe=standard;
@@ -15331,8 +15328,6 @@ static void _viv_set_view_mode(BOOL standard)
         _viv_fit_last_valid=GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);
     }
 
-    SendMessageW(_viv_hwnd,WM_SETREDRAW,TRUE,0);
-    RedrawWindow(_viv_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_FRAME|RDW_ALLCHILDREN|RDW_UPDATENOW);
 }
 
 static void _viv_start_first_frame(void)
