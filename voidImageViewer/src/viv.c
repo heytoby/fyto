@@ -1292,8 +1292,15 @@ static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exi
 // runs once per window when it is activated; it draws nothing itself.
 static void fyto_window_frame(HWND hwnd)
 {
-    BOOL dark=config_theme?FALSE:TRUE;
-    COLORREF background=_viv_exif_background();
+    LOGBRUSH lb;
+    BOOL dark;
+    /* Immersive means one colour: the frame takes the colour the window itself
+       paints its client with, so the two can never disagree. */
+    COLORREF background=GetSysColor(COLOR_BTNFACE);
+    HBRUSH brush=(HBRUSH)GetClassLongPtrW(hwnd,GCLP_HBRBACKGROUND);
+    if (brush && GetObjectW(brush,sizeof(lb),&lb)==sizeof(lb) && lb.lbStyle==BS_SOLID)
+        background=lb.lbColor;
+    dark=(GetRValue(background)*299+GetGValue(background)*587+GetBValue(background)*114)<140000;
     DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));
     DwmSetWindowAttribute(hwnd,19,&dark,sizeof(dark));
     DwmSetWindowAttribute(hwnd,35,&background,sizeof(background));
