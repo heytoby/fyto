@@ -1314,6 +1314,14 @@ static void _viv_apply_theme(void)
     config_fullscreen_background_color_g=GetGValue(c);
     config_fullscreen_background_color_b=GetBValue(c);
     _viv_apply_menu_theme();
+    /* Our title row lives in the non-client area, which Windows caches: without
+       an explicit frame redraw the window keeps the previous colour until some
+       unrelated event (a screenshot, a resize) forces the frame out again. */
+    if (_viv_hwnd)
+    {
+        SetWindowPos(_viv_hwnd,NULL,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
+        RedrawWindow(_viv_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_FRAME|RDW_UPDATENOW|RDW_ALLCHILDREN);
+    }
 }
 static COLORREF _viv_exif_background(void){return _viv_is_fullscreen?RGB(config_fullscreen_background_color_r,config_fullscreen_background_color_g,config_fullscreen_background_color_b):RGB(config_windowed_background_color_r,config_windowed_background_color_g,config_windowed_background_color_b);}
 #include "fyto_brand.h"
@@ -6202,6 +6210,10 @@ static int _viv_main(int nCmdShow)
 	if (_viv_init(nCmdShow))
 	{
         fyto_first_run(_viv_hwnd);
+        /* The first frame must already carry the themed chrome: without this the
+           window shows one dark frame before the theme reaches the title row. */
+        _viv_apply_theme();
+        title_paint(_viv_hwnd);
         _viv_wheel_hook_install();
 
 		for(;;)
