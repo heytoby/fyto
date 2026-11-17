@@ -5452,6 +5452,7 @@ static void _viv_process_command_line(wchar_t *cl)
                 // default-format dialog a single time from here.
                 setup_window=1;
                 fyto_formats_requested=1;
+                fyto_formats_auto=1;
             }
             else
             if (string_icompare_lowercase_ascii(bufstart,"formats") == 0)

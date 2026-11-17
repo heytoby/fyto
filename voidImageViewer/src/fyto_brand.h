@@ -52,6 +52,6 @@ static void fyto_first_run(HWND owner)
     DWORD selected=0;
     fyto_startup_complete=1;
     fyto_offer_formats=!fyto_read_association_value(L"SelectedFormats",&selected);
-    if(fyto_formats_requested)fyto_format_dialog(owner);
+    if(fyto_formats_requested && (!fyto_formats_auto || fyto_missing_format_count()))fyto_format_dialog(owner);
     InvalidateRect(owner,NULL,FALSE);
 }

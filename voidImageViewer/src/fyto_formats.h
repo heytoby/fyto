@@ -5,6 +5,9 @@ static const wchar_t *fyto_extensions[]={L".jpg",L".jpeg",L".png",L".webp",L".gi
 #define FYTO_FORMAT_COUNT (sizeof(fyto_extensions)/sizeof(fyto_extensions[0]))
 #define FYTO_ASSOCIATION_KEY L"Software\\fyto\\Associations"
 static int fyto_formats_requested,fyto_startup_complete,fyto_offer_formats;
+// Set when the dialog is opened automatically after an install, so it can
+// stay quiet when every offered format already points at fyto.
+static int fyto_formats_auto;
 static HWND fyto_formats_window;
 
 static BOOL fyto_association_file(wchar_t *path,BOOL create)
@@ -113,9 +116,9 @@ static BOOL fyto_is_setup_sample_launch(void)
     p=string_get_word(string_skip_ws(p),word);
     return word[0] && !*string_skip_ws(p) && fyto_is_setup_sample(word);
 }
-static int fyto_open_format_picker(HWND owner,unsigned index,BOOL wait)
+static int fyto_open_format_picker(HWND owner,unsigned index)
 {
-    wchar_t path[STRING_SIZE],directory[MAX_PATH];SHELLEXECUTEINFOW info;
+    wchar_t path[STRING_SIZE],directory[MAX_PATH];OPENASINFO info;
     if(index==FYTO_FORMAT_COUNT-1){
         OPENFILENAMEW ofn;ZeroMemory(&ofn,sizeof(ofn));path[0]=0;ofn.lStructSize=sizeof(ofn);ofn.hwndOwner=owner;
         ofn.lpstrTitle=L"选择一张 ARW 图片以设置默认打开方式";ofn.lpstrFilter=L"Sony RAW (*.arw)\0*.arw\0\0";
@@ -140,16 +143,14 @@ static int fyto_open_format_picker(HWND owner,unsigned index,BOOL wait)
         ok=WriteFile(file,fyto_format_samples[index].data,fyto_format_samples[index].size,&written,NULL) && written==fyto_format_samples[index].size;CloseHandle(file);
         if(!ok){DeleteFileW(path);return -1;}
     }
-    // The system's Open With picker provides the user's Always choice.
-    // No protected UserChoice data is written.
-    ZeroMemory(&info,sizeof(info));info.cbSize=sizeof(info);info.hwnd=owner;info.lpVerb=L"openas";info.lpFile=path;
-    info.fMask=SEE_MASK_NOASYNC|SEE_MASK_NOCLOSEPROCESS|SEE_MASK_INVOKEIDLIST;info.nShow=SW_SHOWNORMAL;
-    if(!ShellExecuteExW(&info))return -1;
-    if(info.hProcess){
-        if(wait)WaitForSingleObject(info.hProcess,120000);
-        CloseHandle(info.hProcess);
-    }
-    return TRUE;
+    // SHOpenWithDialog is synchronous: it returns after the user closes the
+    // picker, so the checkbox can show the real state immediately instead of
+    // asking the user to tick it a second time. Windows still requires this one
+    // confirmation per file type; SetAppAsDefault has been ignored since Win8.
+    ZeroMemory(&info,sizeof(info));
+    info.pcszFile=path;
+    info.oaifInFlags=OAIF_ALLOW_REGISTRATION|OAIF_REGISTER_EXT|OAIF_EXEC;
+    return SHOpenWithDialog(owner,&info)==S_OK;
 }
 static DWORD fyto_initial_format_selection(void)
 {
@@ -166,10 +167,18 @@ static BOOL fyto_offered_format(unsigned index)
     // so it is not offered as a default format.
     return index + 1 < FYTO_FORMAT_COUNT;
 }
+static unsigned fyto_missing_format_count(void)
+{
+    DWORD mask=fyto_initial_format_selection();unsigned i,n=0;
+    for(i=0;i<FYTO_FORMAT_COUNT;i++)
+        if(fyto_offered_format(i) && (mask&(1u<<i)) && !fyto_is_default(fyto_extensions[i]))n++;
+    return n;
+}
 static BOOL fyto_set_default(HWND owner,unsigned index)
 {
     if(fyto_is_default(fyto_extensions[index]))return TRUE;
-    if(fyto_open_format_picker(owner,index,TRUE)<0)return FALSE;
+    if(!fyto_open_format_picker(owner,index))return FALSE;
+    SHChangeNotify(SHCNE_ASSOCCHANGED,SHCNF_IDLIST,NULL,NULL);
     return fyto_is_default(fyto_extensions[index]);
 }
 // Windows signs UserChoice, so a checked box can only be applied by letting the
