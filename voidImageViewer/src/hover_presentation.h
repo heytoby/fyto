@@ -114,7 +114,7 @@ static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE al
 static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wchar_t *filename,
     int image_w,int image_h,int minimal,int playing,BYTE text_alpha,int show_play,int dpi_x,int dpi_y)
 {
-    fyto_hover_layout_t layout;wchar_t resolution[80];HGDIOBJ old_font;int saved,x,y,radius,pass,shift;
+    fyto_hover_layout_t layout;HGDIOBJ old_font;int saved;
     fyto_hover_layout(image,canvas,dpi_x,dpi_y,&layout);
     saved=SaveDC(dc);IntersectClipRect(dc,canvas->left,canvas->top,canvas->right,canvas->bottom);
     if(!fyto_hover_font || fyto_hover_font_dpi!=dpi_y){
@@ -128,26 +128,6 @@ static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wc
     SetBkMode(dc,TRANSPARENT);
     if(minimal && filename)fyto_hover_text(dc,filename,layout.filename,
         DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y,fyto_caption_font_pixels(dpi_y));
-    SelectObject(dc,fyto_hover_font?fyto_hover_font:GetStockObject(DEFAULT_GUI_FONT));
-    swprintf_s(resolution,80,L"%d × %d",image_w,image_h);
-    fyto_hover_text(dc,resolution,layout.resolution,DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y,MulDiv(13,dpi_y,96));
-    x=(layout.play.left+layout.play.right)/2;y=(layout.play.top+layout.play.bottom)/2;
-    radius=min(MulDiv(10,dpi_y,96),(layout.play.bottom-layout.play.top)/3);
-    if(show_play && radius>=2){
-        SelectObject(dc,GetStockObject(NULL_PEN));SelectObject(dc,GetStockObject(DC_BRUSH));
-        for(pass=0;pass<2;pass++){
-            shift=pass?0:1;SetDCBrushColor(dc,pass?RGB(255,255,255):RGB(0,0,0));
-            if(playing){
-                RECT bar;int gap=max(1,radius/3),bar_w=max(2,radius/2);
-                SetRect(&bar,x-gap-bar_w+shift,y-radius+shift,x-gap+shift,y+radius+shift);
-                FillRect(dc,&bar,(HBRUSH)GetStockObject(DC_BRUSH));
-                OffsetRect(&bar,bar_w+gap*2,0);FillRect(dc,&bar,(HBRUSH)GetStockObject(DC_BRUSH));
-            }else{
-                POINT points[3]={{x-radius/2+shift,y-radius+shift},{x+radius+shift,y+shift},{x-radius/2+shift,y+radius+shift}};
-                Polygon(dc,points,3);
-            }
-        }
-    }
     SelectObject(dc,old_font);RestoreDC(dc,saved);
 }
 static void fyto_hover_presentation_destroy(void)

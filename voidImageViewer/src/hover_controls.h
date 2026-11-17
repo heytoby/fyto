@@ -22,8 +22,8 @@ static void fyto_hover_invalidate(HWND hwnd)
     RECT image,canvas,r;fyto_hover_layout_t layout;int i;
     if(!fyto_visible_image_rect(&image))return;
     _viv_viewport_rect(&canvas);fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
-    for(i=0;i<4;i++){
-        const RECT *areas[]={&layout.filename,&layout.resolution,&layout.play,&layout.pin};
+    for(i=0;i<2;i++){
+        const RECT *areas[]={&layout.filename,&layout.pin};
         r=*areas[i];
         if(!IsRectEmpty(&r)){int margin=fyto_hover_shadow_radius(os_logical_high);InflateRect(&r,margin,margin);InvalidateRect(hwnd,&r,FALSE);}
     }
@@ -57,7 +57,6 @@ static UINT fyto_hover_command(POINT point)
     over_image=PtInRect(&image,point);
     _viv_viewport_rect(&canvas);fyto_hover_layout(&image,&canvas,os_logical_wide,os_logical_high,&layout);
     if(!config_show_caption && (over_image || fyto_image_hover) && PtInRect(&layout.pin,point))return VIV_ID_VIEW_ONTOP_ALWAYS;
-    if(over_image && PtInRect(&layout.play,point))return VIV_ID_SLIDESHOW_PAUSE;
     return 0;
 }
 static void fyto_update_image_hover(POINT point)

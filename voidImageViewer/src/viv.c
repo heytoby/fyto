@@ -639,6 +639,9 @@ static void _viv_hide_cursor(void);
 static int _viv_should_show_cursor(void);
 static void _viv_update_show_cursor(void);
 static void _viv_start_hide_cursor_timer(void);
+static void _viv_wheel_hook_install(void);
+static void _viv_wheel_hook_remove(void);
+
 static int _viv_main(int nCmdShow);
 static void _viv_get_exe_filename(wchar_t filename[STRING_SIZE]);
 static void _viv_do_left_click_action(int action);
@@ -6173,6 +6176,7 @@ static int _viv_main(int nCmdShow)
 	if (_viv_init(nCmdShow))
 	{
         fyto_first_run(_viv_hwnd);
+        _viv_wheel_hook_install();
 
 		for(;;)
 		{
@@ -6204,6 +6208,33 @@ static int _viv_main(int nCmdShow)
     fyto_text_shutdown();
 
 	return 0;
+}
+
+// Mouse wheel anywhere on the monitor while this window is the foreground one.
+// WM_MOUSEWHEEL alone only arrives when the cursor is over the window.
+static HHOOK _viv_wheel_hook;
+static LRESULT CALLBACK _viv_wheel_hook_proc(int code,WPARAM wparam,LPARAM lparam)
+{
+    if(code==HC_ACTION && wparam==WM_MOUSEWHEEL && _viv_hwnd && GetForegroundWindow()==_viv_hwnd)
+    {
+        MSLLHOOKSTRUCT *ms=(MSLLHOOKSTRUCT *)lparam;
+        RECT r;
+        if(GetWindowRect(_viv_hwnd,&r) && !PtInRect(&r,ms->pt))
+        {
+            UINT delta=(UINT)(SHORT)HIWORD(ms->mouseData);
+            PostMessageW(_viv_hwnd,WM_MOUSEWHEEL,MAKEWPARAM(0,delta),MAKELPARAM(ms->pt.x,ms->pt.y));
+            return 1;
+        }
+    }
+    return CallNextHookEx(NULL,code,wparam,lparam);
+}
+static void _viv_wheel_hook_install(void)
+{
+    if(!_viv_wheel_hook)_viv_wheel_hook=SetWindowsHookExW(WH_MOUSE_LL,_viv_wheel_hook_proc,GetModuleHandleW(NULL),0);
+}
+static void _viv_wheel_hook_remove(void)
+{
+    if(_viv_wheel_hook){UnhookWindowsHookEx(_viv_wheel_hook);_viv_wheel_hook=NULL;}
 }
 
 int APIENTRY WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine,int nShowCmd)
@@ -9069,7 +9100,7 @@ static void _viv_options_update_sheild(HWND hwnd)
 
 static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
-	if (msg == WM_INITDIALOG) l10n_dialog(hwnd);
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); fyto_light_caption(hwnd); }
 
 	switch(msg)
 	{

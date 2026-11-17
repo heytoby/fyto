@@ -22,12 +22,24 @@ static void title_release_fonts(void)
     if (title_menu_font)DeleteObject(title_menu_font);
     title_font=title_menu_font=NULL;
 }
-// The caption/menu row is window chrome, not part of the image canvas.
-// Keep it light grey so it reads like a normal Windows title bar instead of
-// a black band above the picture.
-static COLORREF title_chrome_bg(void)
+// The viewer keeps its dark canvas, but its dialogs should not inherit the
+// system dark title bar (they read as a black band above the sheet).
+static void fyto_light_caption(HWND hwnd)
 {
-	return GetSysColor(COLOR_BTNFACE);
+    HMODULE dwm=LoadLibraryW(L"dwmapi.dll");
+    if(dwm)
+    {
+        typedef HRESULT (WINAPI *set_attr_t)(HWND,DWORD,LPCVOID,DWORD);
+        set_attr_t set_attr=(set_attr_t)GetProcAddress(dwm,"DwmSetWindowAttribute");
+        if(set_attr)
+        {
+            BOOL off=FALSE;
+            set_attr(hwnd,20,&off,sizeof(off)); /* DWMWA_USE_IMMERSIVE_DARK_MODE */
+            set_attr(hwnd,19,&off,sizeof(off)); /* same attribute before 20H1 */
+        }
+        FreeLibrary(dwm);
+    }
+    SetWindowPos(hwnd,NULL,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
 }
 static void title_paint(HWND hwnd)
 {
@@ -36,7 +48,7 @@ static void title_paint(HWND hwnd)
     HDC dc, target, buffer;
     int width,height,i,x,button,padding,margin;
     wchar_t label[256],filename[STRING_SIZE];
-    COLORREF bg=title_chrome_bg();
+    COLORREF bg=_viv_exif_background();
 
     if (!config_show_caption) {
         title_dirty = FALSE;
