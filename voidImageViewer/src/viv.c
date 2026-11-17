@@ -2051,7 +2051,21 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 			break;
 	
 		case VIV_ID_HELP_HELP:
-			ShellExecuteA(_viv_hwnd,NULL,"https://github.com/heytoby/fyto",NULL,NULL,SW_SHOWNORMAL);
+			{
+				static const wchar_t keys[]=
+					L"← →          上一张 / 下一张\n"
+					L"Home / End   第一张 / 最后一张\n"
+					L"Space        暂停 / 继续幻灯片\n"
+					L"↑ ↓          放大 / 缩小\n"
+					L"0            适应窗口\n"
+					L"1            切换标准 / 极简模式\n"
+					L"A            显示 / 隐藏 EXIF 面板\n"
+					L"F            全屏\n"
+					L"Esc          退出全屏 / 关闭面板\n"
+					L"Ctrl + C     复制图片\n"
+					L"Del          删除当前图片";
+				MessageBoxW(_viv_hwnd,keys,config_language?L"快捷键":L"Shortcuts",MB_OK|MB_ICONINFORMATION);
+			}
 			break;
 			
 		case VIV_ID_HELP_COMMAND_LINE_OPTIONS:
