@@ -1287,6 +1287,23 @@ HMODULE LoadUnicowsProc(void)
 
 // EXIF reserves a side panel; the original viewer chrome and coordinates are retained.
 static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);}
+static void _viv_apply_menu_theme(void);
+static void _viv_apply_menu_theme(void)
+{
+    static HBRUSH menu_brush;
+    MENUINFO info;
+
+    if (!_viv_hmenu)return;
+    if (menu_brush)DeleteObject(menu_brush);
+    menu_brush=CreateSolidBrush(_viv_exif_background());
+    if (!menu_brush)return;
+    ZeroMemory(&info,sizeof(info));
+    info.cbSize=sizeof(info);
+    info.fMask=MIM_BACKGROUND|MIM_APPLYTOSUBMENUS;
+    info.hbrBack=menu_brush;
+    SetMenuInfo(_viv_hmenu,&info);
+}
+
 static void _viv_apply_theme(void)
 {
     COLORREF c=config_theme?RGB(243,243,243):RGB(38,38,38);
@@ -1296,6 +1313,7 @@ static void _viv_apply_theme(void)
     config_fullscreen_background_color_r=GetRValue(c);
     config_fullscreen_background_color_g=GetGValue(c);
     config_fullscreen_background_color_b=GetBValue(c);
+    _viv_apply_menu_theme();
 }
 static COLORREF _viv_exif_background(void){return _viv_is_fullscreen?RGB(config_fullscreen_background_color_r,config_fullscreen_background_color_g,config_fullscreen_background_color_b):RGB(config_windowed_background_color_r,config_windowed_background_color_g,config_windowed_background_color_b);}
 #include "fyto_brand.h"
