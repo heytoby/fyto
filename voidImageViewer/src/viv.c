@@ -15311,6 +15311,9 @@ static void _viv_set_view_mode(BOOL standard)
         screen_filling=fyto_window_needs_drag_restore(_viv_hwnd);
     }
 
+    // Freeze painting while the frame moves/resizes, otherwise an intermediate
+    // repaint shows the dark canvas for a frame and the toggle flickers.
+    SendMessageW(_viv_hwnd,WM_SETREDRAW,FALSE,0);
     config_show_menu=standard;
     config_show_caption=standard;
     config_show_thickframe=standard;
@@ -15327,6 +15330,9 @@ static void _viv_set_view_mode(BOOL standard)
         if (_viv_user_sized_window)_viv_remember_manual_size();
         _viv_fit_last_valid=GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);
     }
+
+    SendMessageW(_viv_hwnd,WM_SETREDRAW,TRUE,0);
+    RedrawWindow(_viv_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_FRAME|RDW_ALLCHILDREN|RDW_UPDATENOW);
 }
 
 static void _viv_start_first_frame(void)
