@@ -2332,8 +2332,7 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 		case VIV_ID_VIEW_EXIF:
 			config_show_exif = !config_show_exif;
 			exif_sync(_viv_hwnd,_viv_current_fd ? _viv_current_fd->cFileName : L"",1);
-			/* no window refit: growing the frame by the panel width made the
-			   whole window jump; the panel takes space from the image instead. */
+			_viv_fit_image_window();
 			_viv_on_size();InvalidateRect(_viv_hwnd,NULL,FALSE);
 			break;
 
@@ -15368,15 +15367,40 @@ static BOOL _viv_mode_window_rect(const RECT *original,const RECT *photo,const R
 
 static void _viv_set_view_mode(BOOL standard)
 {
-    // Chrome only. The title row keeps its reserved height, so switching modes
-    // never resizes the window and never moves or rescales the image.
+    RECT original,photo,work,target;
+    POINT origin={0,0};
+    BYTE was_fitting=_viv_fitting_window;
+    BOOL screen_filling=FALSE;
+    BOOL refit=(!!config_show_caption!=standard) && !_viv_zoom_pos && !_viv_1to1 &&
+        _viv_doing!=_VIV_DOING_1TO1SCROLL && !IsIconic(_viv_hwnd) &&
+        _viv_dst_zoom_x_pos==_VIV_DST_ZOOM_ONE && _viv_dst_zoom_y_pos==_VIV_DST_ZOOM_ONE &&
+        GetWindowRect(_viv_hwnd,&original) &&
+        (_viv_is_fullscreen || IsZoomed(_viv_hwnd) || !_viv_window_arranged(_viv_hwnd)) &&
+        fyto_visible_image_rect(&photo) && ClientToScreen(_viv_hwnd,&origin);
+    if (refit)
+    {
+        OffsetRect(&photo,origin.x,origin.y);
+        os_MonitorRectFromWindow(_viv_hwnd,0,&work);
+        screen_filling=fyto_window_needs_drag_restore(_viv_hwnd);
+    }
+
     config_show_menu=standard;
     config_show_caption=standard;
     config_show_thickframe=standard;
     config_show_status=0;
     config_show_controls=0;
-    _viv_update_frame(NULL);
-    InvalidateRect(_viv_hwnd,NULL,FALSE);
+    refit=refit && _viv_mode_window_rect(&original,&photo,&work,screen_filling,standard,&target);
+    if (refit)_viv_fitting_window=1;
+    _viv_update_frame(refit?&target:NULL);
+    _viv_fitting_window=was_fitting;
+
+    if (refit)
+    {
+        if (screen_filling)_viv_user_sized_window=1;
+        if (_viv_user_sized_window)_viv_remember_manual_size();
+        _viv_fit_last_valid=GetWindowRect(_viv_hwnd,&_viv_fit_last_rect);
+    }
+
 }
 
 static void _viv_start_first_frame(void)
