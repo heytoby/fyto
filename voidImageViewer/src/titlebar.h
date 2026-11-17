@@ -24,12 +24,6 @@ static void title_release_fonts(void)
 }
 // The viewer keeps its dark canvas, but its dialogs should not inherit the
 // system dark title bar (they read as a black band above the sheet).
-static void fyto_light_caption(HWND hwnd,COLORREF background)
-{
-    BOOL dark=FALSE;
-    DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));      /* not a dark frame */
-    DwmSetWindowAttribute(hwnd,35,&background,sizeof(background));
-}
 static void title_paint(HWND hwnd)
 {
     RECT wr,cr,r,bar;

@@ -6164,22 +6164,6 @@ static void _viv_kill(void)
 #endif	
 }
 
-// Every popup of this process gets a caption matching the dialog colour.
-// A WinEvent hook is used rather than a thread CBT hook: the shell builds the
-// property sheet and some dialogs on worker threads, which a thread-local CBT
-// hook never sees. The callback only sets DWM attributes, once per window.
-static HWINEVENTHOOK _viv_caption_event;
-static void CALLBACK _viv_caption_callback(HWINEVENTHOOK hook,DWORD event,HWND hwnd,
-    LONG id_object,LONG id_child,DWORD thread,DWORD time)
-{
-    DWORD pid=0;
-    (void)hook;(void)event;(void)thread;(void)time;
-    if(!hwnd || id_object!=OBJID_WINDOW || id_child!=CHILDID_SELF)return;
-    GetWindowThreadProcessId(hwnd,&pid);
-    if(pid!=GetCurrentProcessId() || hwnd==_viv_hwnd)return;
-    if(!(GetWindowLongW(hwnd,GWL_STYLE)&WS_CAPTION))return;
-    fyto_light_caption(hwnd,GetSysColor(COLOR_BTNFACE));
-}
 
 static int _viv_main(int nCmdShow)
 {
@@ -6190,8 +6174,6 @@ static int _viv_main(int nCmdShow)
 	{
         fyto_first_run(_viv_hwnd);
         _viv_wheel_hook_install();
-        if(!_viv_caption_event)_viv_caption_event=SetWinEventHook(EVENT_OBJECT_SHOW,EVENT_OBJECT_SHOW,
-            NULL,_viv_caption_callback,GetCurrentProcessId(),0,WINEVENT_OUTOFCONTEXT);
 
 		for(;;)
 		{
@@ -6221,7 +6203,6 @@ static int _viv_main(int nCmdShow)
 		_viv_kill();
 	}
     _viv_wheel_hook_remove();
-    if(_viv_caption_event){UnhookWinEvent(_viv_caption_event);_viv_caption_event=NULL;}
     fyto_text_shutdown();
 
 	return 0;
@@ -6257,6 +6238,18 @@ static void _viv_wheel_hook_remove(void)
 
 int APIENTRY WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine,int nShowCmd)
 {
+	{
+		/* One process-wide switch: the shell draws our dialogs with the dark frame
+		   otherwise, and no per-window call can reach the shell's own dialogs. */
+		HMODULE uxtheme=LoadLibraryW(L"uxtheme.dll");
+		if(uxtheme)
+		{
+			typedef int (WINAPI *set_preferred_app_mode_t)(int);
+			set_preferred_app_mode_t set_mode=(set_preferred_app_mode_t)GetProcAddress(uxtheme,MAKEINTRESOURCEA(135));
+			if(set_mode)set_mode(3); /* ForceLight */
+		}
+	}
+
 	return _viv_main(nShowCmd);
 }
 
