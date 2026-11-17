@@ -1036,9 +1036,6 @@ static _viv_command_t _viv_commands[] =
 	{"&Help",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_HELP},
 	{0,MF_SEPARATOR,_VIV_MENU_HELP,0},
 	{"Home &Page",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_WEBSITE},
-	{0,MF_SEPARATOR,_VIV_MENU_HELP,0},
-	{"检查更新...",MF_STRING,_VIV_MENU_HELP,60004},
-	{"&About",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_ABOUT},
 };
 
 #define _VIV_COMMAND_COUNT	(sizeof(_viv_commands) / sizeof(_viv_command_t))
@@ -1120,7 +1117,6 @@ _viv_default_key_t _viv_default_keys[] =
 	{VIV_ID_NAV_END,VK_END},
 	{VIV_ID_NAV_JUMPTO,'J'},
 	{VIV_ID_HELP_HELP,VK_F1},
-	{VIV_ID_HELP_ABOUT,CONFIG_KEYFLAG_CTRL | VK_F1},
 };
 
 #define _VIV_DEFAULT_KEY_COUNT (sizeof(_viv_default_keys) / sizeof(_viv_default_key_t))
