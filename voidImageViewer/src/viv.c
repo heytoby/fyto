@@ -1035,7 +1035,6 @@ static _viv_command_t _viv_commands[] =
 	{0,MF_SEPARATOR,_VIV_MENU_HELP,0},
 	{"Home &Page",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_WEBSITE},
 	{0,MF_SEPARATOR,_VIV_MENU_HELP,0},
-	{"图片格式关联...",MF_STRING,_VIV_MENU_HELP,60003},
 	{"检查更新...",MF_STRING,_VIV_MENU_HELP,60004},
 	{"&About",MF_STRING,_VIV_MENU_HELP,VIV_ID_HELP_ABOUT},
 };
