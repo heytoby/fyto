@@ -495,6 +495,7 @@ static INT_PTR CALLBACK _viv_options_proc(HWND hwndDlg,UINT uMsg,WPARAM wParam,L
 static INT_PTR CALLBACK _viv_options_general_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static INT_PTR CALLBACK _viv_options_controls_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
+static INT_PTR CALLBACK _viv_options_about_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static void _viv_install_association_by_extension(const char *association,const char *description,const char *icon_location);
 static void _viv_uninstall_association_by_extension(const char *association);
 static int _viv_is_association(const char *association);
@@ -522,6 +523,7 @@ static void _viv_timer_stop(void);
 static int _viv_is_window_maximized(HWND hwnd);
 static INT_PTR CALLBACK _viv_custom_rate_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static INT_PTR CALLBACK _viv_about_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
+static INT_PTR CALLBACK fyto_licenses_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static void _viv_update_frame(const RECT *target);
 static void _viv_update_ontop(void);
 static void _viv_update_prevent_sleep(void);
@@ -814,12 +816,12 @@ static volatile int _viv_load_image_terminate = 0;
 static _viv_reply_t *_viv_reply_start = 0;
 static _viv_reply_t *_viv_reply_last = 0;
 static wchar_t *_viv_status_temp_text = 0;
-static const utf8_t *_viv_options_page_names[] = {"General","View","Controls"};
-static int _viv_options_tab_ids[] = {IDC_TAB1,IDC_TAB2,IDC_TAB3};
-static int _viv_options_dialog_ids[] = {IDD_GENERAL,IDD_VIEW,IDD_CONTROLS};
+static const utf8_t *_viv_options_page_names[] = {"General","View","Controls","About"};
+static int _viv_options_tab_ids[] = {IDC_TAB1,IDC_TAB2,IDC_TAB3,IDC_TAB4};
+static int _viv_options_dialog_ids[] = {IDD_GENERAL,IDD_VIEW,IDD_CONTROLS,IDD_ABOUTPAGE};
 #define _VIV_OPTIONS_PAGE_COUNT	(sizeof(_viv_options_dialog_ids) / sizeof(int))
-static int _viv_options_page_ids[] = {VIV_ID_OPTIONS_GENERAL,VIV_ID_OPTIONS_VIEW,VIV_ID_OPTIONS_CONTROLS};
-static DLGPROC _viv_options_page_procs[] = {_viv_options_general_proc,_viv_options_view_proc,_viv_options_controls_proc};
+static int _viv_options_page_ids[] = {VIV_ID_OPTIONS_GENERAL,VIV_ID_OPTIONS_VIEW,VIV_ID_OPTIONS_CONTROLS,VIV_ID_OPTIONS_ABOUT};
+static DLGPROC _viv_options_page_procs[] = {_viv_options_general_proc,_viv_options_view_proc,_viv_options_controls_proc,_viv_options_about_proc};
 static HFONT _viv_about_hfont = 0;
 static wchar_t *_viv_last_open_file = 0;
 static wchar_t *_viv_last_open_folder = 0;
@@ -9168,6 +9170,35 @@ static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,
 			break;
 	}
 	
+	return FALSE;
+}
+
+static INT_PTR CALLBACK _viv_options_about_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
+{
+	if (msg == WM_INITDIALOG) { l10n_dialog(hwnd); }
+
+	switch(msg)
+	{
+		case WM_COMMAND:
+
+			switch(LOWORD(wParam))
+			{
+				case IDC_ABOUTPAGE_UPDATE:
+					fyto_check_updates(hwnd);
+					break;
+
+				case IDC_ABOUTPAGE_LICENSES:
+					DialogBoxParamW(os_hinstance,MAKEINTRESOURCEW(60011),hwnd,fyto_licenses_proc,0);
+					break;
+
+				case IDC_ABOUTPAGE_ABOUT:
+					DialogBox(os_hinstance,MAKEINTRESOURCE(IDD_ABOUT),hwnd,_viv_about_proc);
+					break;
+			}
+
+			break;
+	}
+
 	return FALSE;
 }
 

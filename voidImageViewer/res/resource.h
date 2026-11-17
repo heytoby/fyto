@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ generated include file.
 // Used by voidImageViewer.rc
 //
@@ -25,6 +25,7 @@
 #define IDD_RENAME                      127
 #define IDD_JUMPTO                      128
 #define IDD_EVERYTHING                  129
+#define IDD_ABOUTPAGE                   130
 #define IDC_TAB1                        1003
 #define IDC_BMP                         1006
 #define IDC_GIF                         1007
@@ -88,6 +89,10 @@
 #define IDC_AUTO_ZOOM                   1050
 #define IDC_COMBO4                      1051
 #define IDC_THEME                       1052
+#define IDC_TAB4                        1053
+#define IDC_ABOUTPAGE_UPDATE            1054
+#define IDC_ABOUTPAGE_LICENSES          1055
+#define IDC_ABOUTPAGE_ABOUT             1056
 
 // Next default values for new objects
 // 
