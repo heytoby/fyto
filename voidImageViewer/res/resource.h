@@ -87,6 +87,7 @@
 #define IDC_CACHE_LAST_IMAGE            1049
 #define IDC_AUTO_ZOOM                   1050
 #define IDC_COMBO4                      1051
+#define IDC_THEME                       1052
 
 // Next default values for new objects
 // 

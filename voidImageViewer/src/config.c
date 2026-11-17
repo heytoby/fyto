@@ -68,6 +68,7 @@ BYTE config_ctrl_mouse_wheel_action = 0; // 0 = zoom, 1 = next/prev, 2=prev/next
 BYTE config_left_click_action = 0; // 0 = scroll, 1 = play/pause slideshow, 2 = play/pause animation, 3=zoom in, 4=next, 5=1:1 scroll, 6=move-window
 BYTE config_right_click_action = 0; // 0 = context menu, 1=zoom out, 2=prev, 
 BYTE config_xbutton_action = 2; // 1=zoom, 2=next
+BYTE config_theme = 0;
 BYTE config_windowed_background_color_r = 28;
 BYTE config_windowed_background_color_g = 28;
 BYTE config_windowed_background_color_b = 28;
@@ -144,7 +145,8 @@ static void _config_load_settings_by_location(const wchar_t *path,int is_root)
 		config_right_click_action = ini_get_int(ini,(const utf8_t *)"right_click_action",config_right_click_action);
 		config_xbutton_action = ini_get_int(ini,(const utf8_t *)"xbutton_action",config_xbutton_action);
 		config_keep_centered = ini_get_int(ini,(const utf8_t *)"keep_centered",config_keep_centered);
-		config_windowed_background_color_r = ini_get_int(ini,(const utf8_t *)"windowed_background_color_r",config_windowed_background_color_r);
+		config_theme = (BYTE)ini_get_int(ini,(const utf8_t *)"theme",config_theme);
+config_windowed_background_color_r = ini_get_int(ini,(const utf8_t *)"windowed_background_color_r",config_windowed_background_color_r);
 		config_windowed_background_color_g = ini_get_int(ini,(const utf8_t *)"windowed_background_color_g",config_windowed_background_color_g);
 		config_windowed_background_color_b = ini_get_int(ini,(const utf8_t *)"windowed_background_color_b",config_windowed_background_color_b);
 		config_windowed_hide_cursor = ini_get_int(ini,(const utf8_t *)"windowed_hide_cursor",config_windowed_hide_cursor);
@@ -367,7 +369,8 @@ static void _config_save_settings_by_location(const wchar_t *path,int is_root)
 			_config_write_int(h,"right_click_action",config_right_click_action);
 			_config_write_int(h,"xbutton_action",config_xbutton_action);
 			_config_write_int(h,"keep_centered",config_keep_centered);
-			_config_write_int(h,"windowed_background_color_r",config_windowed_background_color_r);
+			_config_write_int(h,"theme",config_theme);
+_config_write_int(h,"windowed_background_color_r",config_windowed_background_color_r);
 			_config_write_int(h,"windowed_background_color_g",config_windowed_background_color_g);
 			_config_write_int(h,"windowed_background_color_b",config_windowed_background_color_b);
 			_config_write_int(h,"windowed_hide_cursor",config_windowed_hide_cursor);

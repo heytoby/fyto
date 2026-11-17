@@ -1287,6 +1287,16 @@ HMODULE LoadUnicowsProc(void)
 
 // EXIF reserves a side panel; the original viewer chrome and coordinates are retained.
 static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);}
+static void _viv_apply_theme(void)
+{
+    COLORREF c=config_theme?RGB(243,243,243):RGB(38,38,38);
+    config_windowed_background_color_r=GetRValue(c);
+    config_windowed_background_color_g=GetGValue(c);
+    config_windowed_background_color_b=GetBValue(c);
+    config_fullscreen_background_color_r=GetRValue(c);
+    config_fullscreen_background_color_g=GetGValue(c);
+    config_fullscreen_background_color_b=GetBValue(c);
+}
 static COLORREF _viv_exif_background(void){return _viv_is_fullscreen?RGB(config_fullscreen_background_color_r,config_fullscreen_background_color_g,config_fullscreen_background_color_b):RGB(config_windowed_background_color_r,config_windowed_background_color_g,config_windowed_background_color_b);}
 #include "fyto_brand.h"
 #include "fyto_update.h"
@@ -5854,6 +5864,7 @@ static int _viv_init(int nCmdShow)
 
 	// load settings
 	config_load_settings();
+		_viv_apply_theme();
 	
 	// config_maximized will be overwritten when we show are normal window
 	// so save it now and apply it later.
@@ -9039,17 +9050,16 @@ static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,
 			CheckDlgButton(hwnd,IDC_PRELOAD_NEXT_IMAGE,config_preload_next ? BST_CHECKED : BST_UNCHECKED);
 			CheckDlgButton(hwnd,IDC_CACHE_LAST_IMAGE,config_cache_last ? BST_CHECKED : BST_UNCHECKED);
 			
-			SetWindowLongPtr(GetDlgItem(hwnd,IDC_WINDOWEDBACKGROUNDCOLOR),GWLP_USERDATA,RGB(config_windowed_background_color_r,config_windowed_background_color_g,config_windowed_background_color_b));
-			_viv_update_color_button_bitmap(GetDlgItem(hwnd,IDC_WINDOWEDBACKGROUNDCOLOR));
-
-			SetWindowLongPtr(GetDlgItem(hwnd,IDC_FULLSCREENBACKGROUNDCOLOR),GWLP_USERDATA,RGB(config_fullscreen_background_color_r,config_fullscreen_background_color_g,config_fullscreen_background_color_b));
-			_viv_update_color_button_bitmap(GetDlgItem(hwnd,IDC_FULLSCREENBACKGROUNDCOLOR));
+			if (!ComboBox_GetCount(GetDlgItem(hwnd,IDC_THEME)))
+			{
+				ComboBox_AddString(GetDlgItem(hwnd,IDC_THEME),config_language?L"深色":L"Dark");
+				ComboBox_AddString(GetDlgItem(hwnd,IDC_THEME),config_language?L"浅色":L"Light");
+			}
+			ComboBox_SetCurSel(GetDlgItem(hwnd,IDC_THEME),config_theme?1:0);
 					
 			return FALSE;
 			
 		case WM_DESTROY:	
-			_viv_delete_color_button_bitmap(GetDlgItem(hwnd,IDC_WINDOWEDBACKGROUNDCOLOR));
-			_viv_delete_color_button_bitmap(GetDlgItem(hwnd,IDC_FULLSCREENBACKGROUNDCOLOR));
 			break;
 		
 		case WM_COMMAND:
@@ -9062,21 +9072,18 @@ static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,
 				
 					break; 
 				
-				case IDC_WINDOWEDBACKGROUNDCOLOR:
-				case IDC_FULLSCREENBACKGROUNDCOLOR:
-					
+				case IDC_THEME:
+					if (HIWORD(wParam) == CBN_SELCHANGE)
 					{
-						COLORREF color;
-						
-						color = GetWindowLongPtr(GetDlgItem(hwnd,LOWORD(wParam)),GWLP_USERDATA);
-						
-						if (os_choose_color(hwnd,&color))
-						{
-							SetWindowLongPtr(GetDlgItem(hwnd,LOWORD(wParam)),GWLP_USERDATA,color);
-							_viv_update_color_button_bitmap(GetDlgItem(hwnd,LOWORD(wParam)));
-						}
+						config_theme = (BYTE)(ComboBox_GetCurSel(GetDlgItem(hwnd,IDC_THEME)) == 1);
+						_viv_apply_theme();
+						exif_set_background(_viv_exif_background());
+						if (_viv_hwnd) title_paint(_viv_hwnd);
+						if (_viv_rebar_hwnd) InvalidateRect(_viv_rebar_hwnd,NULL,TRUE);
+						if (_viv_toolbar_hwnd) InvalidateRect(_viv_toolbar_hwnd,NULL,TRUE);
+						if (_viv_status_hwnd) InvalidateRect(_viv_status_hwnd,NULL,TRUE);
+						if (_viv_hwnd) InvalidateRect(_viv_hwnd,0,FALSE);
 					}
-					
 					break;
 			}
 			
@@ -9350,30 +9357,6 @@ static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARA
 						else
 						{
 							config_shrink_blit_mode = CONFIG_SHRINK_BLIT_MODE_COLORONCOLOR;
-						}
-						
-						colorref = (COLORREF)GetWindowLongPtr(GetDlgItem(view_page,IDC_WINDOWEDBACKGROUNDCOLOR),GWLP_USERDATA);
-
-						if ((GetRValue(colorref) != config_windowed_background_color_r) || (GetGValue(colorref) != config_windowed_background_color_g) || (GetBValue(colorref) != config_windowed_background_color_b))
-						{
-							config_windowed_background_color_r = GetRValue(colorref);
-							config_windowed_background_color_g = GetGValue(colorref);
-							config_windowed_background_color_b = GetBValue(colorref);
-                            exif_set_background(_viv_exif_background());title_paint(_viv_hwnd);if(_viv_rebar_hwnd)InvalidateRect(_viv_rebar_hwnd,NULL,TRUE);if(_viv_toolbar_hwnd)InvalidateRect(_viv_toolbar_hwnd,NULL,TRUE);if(_viv_status_hwnd)InvalidateRect(_viv_status_hwnd,NULL,TRUE);
-
-							InvalidateRect(_viv_hwnd,0,FALSE);
-						}
-						
-						colorref = (COLORREF)GetWindowLongPtr(GetDlgItem(view_page,IDC_FULLSCREENBACKGROUNDCOLOR),GWLP_USERDATA);
-						
-						if ((GetRValue(colorref) != config_fullscreen_background_color_r) || (GetGValue(colorref) != config_fullscreen_background_color_g) || (GetBValue(colorref) != config_fullscreen_background_color_b))
-						{
-							config_fullscreen_background_color_r = GetRValue(colorref);
-							config_fullscreen_background_color_g = GetGValue(colorref);
-							config_fullscreen_background_color_b = GetBValue(colorref);
-                            exif_set_background(_viv_exif_background());title_paint(_viv_hwnd);if(_viv_rebar_hwnd)InvalidateRect(_viv_rebar_hwnd,NULL,TRUE);if(_viv_toolbar_hwnd)InvalidateRect(_viv_toolbar_hwnd,NULL,TRUE);if(_viv_status_hwnd)InvalidateRect(_viv_status_hwnd,NULL,TRUE);
-
-							InvalidateRect(_viv_hwnd,0,FALSE);
 						}
 						
 						if (old_shrink_blit_mode != config_shrink_blit_mode)
