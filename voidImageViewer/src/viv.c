@@ -1339,29 +1339,63 @@ static void fyto_frame_hook_install(void)
         fyto_frame_hook_handle=SetWindowsHookExW(WH_CBT,fyto_frame_hook,NULL,GetCurrentThreadId());
 }
 
+// Menu colours are applied once per menu handle (after the menu exists) and
+// again only when the theme colour changes. Never while a popup is opening.
+// The owner-draw code below reuses these cached brushes so painting allocates
+// nothing.
+static HBRUSH fyto_menu_brush;
+static HBRUSH fyto_menu_selected_brush;
+static HMENU fyto_menu_themed;
+static COLORREF fyto_menu_background;
+static COLORREF fyto_menu_selected_background;
+
 static void _viv_apply_menu_theme(void);
 static void _viv_apply_menu_theme(void)
 {
-    static HBRUSH menu_brush;
-    static COLORREF menu_brush_color;
     MENUINFO info;
-    COLORREF color;
-    HBRUSH brush;
+    COLORREF color,selected;
+    HBRUSH brush,selected_brush,old_brush,old_selected;
+    BOOL recolour;
 
-    if (!_viv_hmenu)return;
     color=_viv_exif_background();
-    if (menu_brush && menu_brush_color==color)return;
-    brush=CreateSolidBrush(color);
-    if (!brush)return;
-    ZeroMemory(&info,sizeof(info));
-    info.cbSize=sizeof(info);
-    info.fMask=MIM_BACKGROUND|MIM_APPLYTOSUBMENUS;
-    info.hbrBack=brush;
-    SetMenuInfo(_viv_hmenu,&info);
-    /* The menu no longer references the old brush once SetMenuInfo returned. */
-    if (menu_brush)DeleteObject(menu_brush);
-    menu_brush=brush;
-    menu_brush_color=color;
+    selected=color;
+    recolour=(!fyto_menu_brush || fyto_menu_background!=color);
+    brush=0;
+    selected_brush=0;
+    if (recolour)
+    {
+        selected=ui_mix(color,14);
+        brush=CreateSolidBrush(color);
+        selected_brush=CreateSolidBrush(selected);
+        if (!brush || !selected_brush)
+        {
+            if (brush)DeleteObject(brush);
+            if (selected_brush)DeleteObject(selected_brush);
+            return;
+        }
+    }
+    if (_viv_hmenu && (recolour || fyto_menu_themed!=_viv_hmenu))
+    {
+        ZeroMemory(&info,sizeof(info));
+        info.cbSize=sizeof(info);
+        info.fMask=MIM_BACKGROUND|MIM_APPLYTOSUBMENUS;
+        info.hbrBack=recolour?brush:fyto_menu_brush;
+        SetMenuInfo(_viv_hmenu,&info);
+        fyto_menu_themed=_viv_hmenu;
+    }
+    if (recolour)
+    {
+        /* Only now is the old brush unreferenced by the menu (or there is no
+           menu yet), so it is safe to delete it. */
+        old_brush=fyto_menu_brush;
+        old_selected=fyto_menu_selected_brush;
+        fyto_menu_brush=brush;
+        fyto_menu_selected_brush=selected_brush;
+        fyto_menu_background=color;
+        fyto_menu_selected_background=selected;
+        if (old_brush)DeleteObject(old_brush);
+        if (old_selected)DeleteObject(old_selected);
+    }
 }
 
 static void _viv_apply_theme(void)
@@ -6056,6 +6090,8 @@ static int _viv_init(int nCmdShow)
 		(HICON)LoadImage(os_hinstance,MAKEINTRESOURCE(IDI_ICON1),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),0));
 	
 	_viv_hmenu = _viv_create_menu();
+	/* The menu exists now; the earlier theme pass ran before it did. */
+	_viv_apply_menu_theme();
 	
 	rect.left = config_x;
 	rect.top = config_y;
@@ -9533,6 +9569,7 @@ static INT_PTR CALLBACK _viv_options_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARA
 							}
 							
 							_viv_hmenu = new_hmenu;
+							_viv_apply_menu_theme();
 							DrawMenuBar(_viv_hwnd);
 						}
 						
