@@ -1284,24 +1284,35 @@ HMODULE LoadUnicowsProc(void)
 
 // EXIF reserves a side panel; the original viewer chrome and coordinates are retained.
 static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);r->bottom-=_viv_get_status_high()+_viv_get_controls_high();if(r->bottom<0)r->bottom=0;}
-// Windows offers no working process-wide switch on this build (SetPreferredAppMode
-// is ignored), so a window's frame can only be set per window, through DWM. This
-// runs once per window when it is activated; it draws nothing itself.
+// fyto's own theme is light/dark for the canvas, but its dialogs are always the
+// native light ones. Windows would otherwise hand them the system dark frame
+// (and some builds render the whole dialog dark), so opt the process into light
+// before the first window or theme handle exists.
+static void fyto_force_light_app_mode(void)
+{
+    HMODULE uxtheme;
+    typedef int (WINAPI *set_preferred_app_mode_t)(int);
+    set_preferred_app_mode_t set_mode;
+
+    uxtheme = LoadLibraryW(L"uxtheme.dll");
+    if (!uxtheme) return;
+    set_mode = (set_preferred_app_mode_t)GetProcAddress(uxtheme,MAKEINTRESOURCEA(135));
+    if (set_mode) set_mode(3); /* ForceLight */
+    FreeLibrary(uxtheme);
+}
+
+// Belt and braces for the dialogs: even with the light app mode, align each
+// dialog's caption with its native light background. Runs once per activation.
 static void fyto_window_frame(HWND hwnd)
 {
-    LOGBRUSH lb;
-    BOOL dark;
-    /* Immersive means one colour: the frame takes the colour the window itself
-       paints its client with, so the two can never disagree. */
-    COLORREF background=GetSysColor(COLOR_BTNFACE);
-    HBRUSH brush=(HBRUSH)GetClassLongPtrW(hwnd,GCLP_HBRBACKGROUND);
-    if (brush && GetObjectW(brush,sizeof(lb),&lb)==sizeof(lb) && lb.lbStyle==BS_SOLID)
-        background=lb.lbColor;
-    dark=(GetRValue(background)*299+GetGValue(background)*587+GetBValue(background)*114)<140000;
+    BOOL dark = FALSE;
+    /* Never read the class background: GCLP_HBRBACKGROUND is often a system
+       colour pseudo brush, and GetObjectW on those returns a bogus solid colour
+       (COLOR_WINDOW+1 reads back as black), which painted black frames. */
+    COLORREF background = GetSysColor(COLOR_BTNFACE);
     DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));
     DwmSetWindowAttribute(hwnd,19,&dark,sizeof(dark));
     DwmSetWindowAttribute(hwnd,35,&background,sizeof(background));
-    DwmSetWindowAttribute(hwnd,34,&background,sizeof(background));
 }
 static void fyto_window_frame_color(HWND hwnd,COLORREF background)
 {
@@ -1309,7 +1320,6 @@ static void fyto_window_frame_color(HWND hwnd,COLORREF background)
     DwmSetWindowAttribute(hwnd,20,&dark,sizeof(dark));
     DwmSetWindowAttribute(hwnd,19,&dark,sizeof(dark));
     DwmSetWindowAttribute(hwnd,35,&background,sizeof(background));
-    DwmSetWindowAttribute(hwnd,34,&background,sizeof(background));
 }
 
 static LRESULT CALLBACK fyto_frame_hook(int code,WPARAM wparam,LPARAM lparam)
@@ -1333,17 +1343,25 @@ static void _viv_apply_menu_theme(void);
 static void _viv_apply_menu_theme(void)
 {
     static HBRUSH menu_brush;
+    static COLORREF menu_brush_color;
     MENUINFO info;
+    COLORREF color;
+    HBRUSH brush;
 
     if (!_viv_hmenu)return;
-    if (menu_brush)DeleteObject(menu_brush);
-    menu_brush=CreateSolidBrush(_viv_exif_background());
-    if (!menu_brush)return;
+    color=_viv_exif_background();
+    if (menu_brush && menu_brush_color==color)return;
+    brush=CreateSolidBrush(color);
+    if (!brush)return;
     ZeroMemory(&info,sizeof(info));
     info.cbSize=sizeof(info);
     info.fMask=MIM_BACKGROUND|MIM_APPLYTOSUBMENUS;
-    info.hbrBack=menu_brush;
+    info.hbrBack=brush;
     SetMenuInfo(_viv_hmenu,&info);
+    /* The menu no longer references the old brush once SetMenuInfo returned. */
+    if (menu_brush)DeleteObject(menu_brush);
+    menu_brush=brush;
+    menu_brush_color=color;
 }
 
 static void _viv_apply_theme(void)
@@ -6260,6 +6278,7 @@ static void _viv_kill(void)
 
 static int _viv_main(int nCmdShow)
 {
+    fyto_force_light_app_mode();
     if(fyto_is_setup_sample_launch())return 0;
     fyto_text_initialize();
     // Startup splash disabled by user preference.
