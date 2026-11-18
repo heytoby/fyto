@@ -1398,8 +1398,16 @@ static void _viv_apply_menu_theme(void)
     }
 }
 
+// Applying a theme is a one-shot operation: it swaps colours, re-themes the menu
+// and forces a whole-window frame redraw. That redraw costs a full paint of the
+// current image, so it must only ever happen at startup, when the user changes
+// the theme, or when the menu is rebuilt - never while browsing images. Keep the
+// theme that was last applied to the window and make repeat calls a no-op:
+// every call site (init, first frame, settings) stays correct, and no future
+// caller can turn this into a per-image repaint.
 static void _viv_apply_theme(void)
 {
+    static int applied_theme = -1;
     COLORREF c=config_theme?RGB(243,243,243):RGB(38,38,38);
     config_windowed_background_color_r=GetRValue(c);
     config_windowed_background_color_g=GetGValue(c);
@@ -1411,8 +1419,9 @@ static void _viv_apply_theme(void)
     /* Our title row lives in the non-client area, which Windows caches: without
        an explicit frame redraw the window keeps the previous colour until some
        unrelated event (a screenshot, a resize) forces the frame out again. */
-    if (_viv_hwnd)
+    if (_viv_hwnd && applied_theme!=(int)config_theme)
     {
+        applied_theme=(int)config_theme;
         SetWindowPos(_viv_hwnd,NULL,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
         RedrawWindow(_viv_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_FRAME|RDW_UPDATENOW|RDW_ALLCHILDREN);
     }
