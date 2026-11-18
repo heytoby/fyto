@@ -1,4 +1,4 @@
-﻿#include <stdlib.h>
+#include <stdlib.h>
 // Defined in titlebar.h, which is included after this header.
 #include "format_samples.h"
 
@@ -197,22 +197,36 @@ static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp
     if(msg==WM_INITDIALOG){
         fyto_formats_window=hwnd;
         SetWindowTextW(hwnd,L"fyto · 默认图片浏览器");
-        fyto_format_control(hwnd,L"STATIC",L"是否将 fyto 设置为默认图片浏览器？",0,0,12,12,280,16);
-        fyto_format_control(hwnd,L"BUTTON",L"全选",WS_TABSTOP,61201,300,10,64,18);
-        fyto_format_control(hwnd,L"STATIC",L"点选格式即可设为默认，Windows 会确认一次。",0,0,12,34,352,14);
+        // The one-click route: Windows signs UserChoice, so the only legal
+        // silent switch is the system "Default apps" page. Everything below is
+        // the per-format fallback.
+        fyto_format_control(hwnd,L"BUTTON",L"一次性设为默认…",WS_TABSTOP|BS_DEFPUSHBUTTON,61202,12,10,190,26);
+        fyto_format_control(hwnd,L"BUTTON",L"全选格式",WS_TABSTOP,61201,210,14,64,18);
+        fyto_format_control(hwnd,L"STATIC",L"一次设好全部图片格式的默认应用。",0,0,12,44,352,14);
+        fyto_format_control(hwnd,L"STATIC",L"也可逐个勾选下列格式，每种需在系统对话框确认一次。",0,0,12,64,352,14);
         for(i=0;i<FYTO_FORMAT_COUNT;i++){
             int x,y;unsigned n=0,k;
             if(!fyto_offered_format(i))continue;
             for(k=0;k<i;k++)if(fyto_offered_format(k))n++;
-            x=12+(int)(n%3)*120;y=58+(int)(n/3)*26;
+            x=12+(int)(n%3)*120;y=84+(int)(n/3)*26;
             fyto_format_control(hwnd,L"BUTTON",fyto_extensions[i],WS_TABSTOP|BS_AUTOCHECKBOX,61000+i,x,y,112,20);
         }
         fyto_sync_boxes(hwnd);
-        fyto_format_control(hwnd,L"BUTTON",L"关闭",WS_TABSTOP|BS_DEFPUSHBUTTON,IDCANCEL,286,138,80,22);
+        fyto_format_control(hwnd,L"BUTTON",L"关闭",WS_TABSTOP,IDCANCEL,286,164,80,22);
         return TRUE;
     }
     if(msg==WM_COMMAND){
         int id=LOWORD(wp);
+        if(id==61202){
+            INT_PTR launched;
+            fyto_write_association_value(L"SetupVersion",1);
+            launched=(INT_PTR)ShellExecuteW(hwnd,L"open",L"ms-settings:defaultapps?registeredAppMachine=fyto",NULL,NULL,SW_SHOWNORMAL);
+            // Some Windows versions do not understand the per-app query; do not
+            // leave the user with a closed dialog and no route to the setting.
+            if(launched<=32)MessageBoxW(hwnd,L"无法自动打开系统设置。请手动打开「设置 → 应用 → 默认应用 → fyto」。",L"fyto",MB_OK|MB_ICONINFORMATION);
+            EndDialog(hwnd,0);
+            return TRUE;
+        }
         if(id==61201){
             for(i=0;i<FYTO_FORMAT_COUNT;i++)
                 if(fyto_offered_format(i) && !fyto_is_default(fyto_extensions[i]))fyto_set_default(hwnd,i);
@@ -240,7 +254,7 @@ static void fyto_format_dialog(HWND owner)
     struct {DLGTEMPLATE dlg;WORD menu,cls,title,point;wchar_t font[9];} data;
 #pragma pack(pop)
     if(fyto_formats_window && IsWindow(fyto_formats_window)){SetForegroundWindow(fyto_formats_window);return;}
-    ZeroMemory(&data,sizeof(data));data.dlg.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME|DS_CENTER|DS_SETFONT;data.dlg.cx=376;data.dlg.cy=172;
+    ZeroMemory(&data,sizeof(data));data.dlg.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME|DS_CENTER|DS_SETFONT;data.dlg.cx=376;data.dlg.cy=200;
     data.point=9;lstrcpyW(data.font,L"Microsoft YaHei UI");
     DialogBoxIndirectParamW(GetModuleHandleW(NULL),&data.dlg,owner,fyto_formats_proc,0);
     fyto_formats_window=NULL;
