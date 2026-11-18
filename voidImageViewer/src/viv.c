@@ -1969,7 +1969,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 		_viv_preload_state = 0;
 		_viv_should_activate_preload_on_load = 0;
         job->render_wide = max(1, rect.right - rect.left);
-        job->render_high = max(1, rect.bottom - rect.top - _viv_get_status_high() - _viv_get_controls_high());
+        job->render_high = max(1, rect.bottom - rect.top);
 		_viv_load_frame_count = 0;
 		os_copy_memory(_viv_load_fd,fd,sizeof(WIN32_FIND_DATA));
 		
@@ -3022,7 +3022,7 @@ static RECT _viv_empty_open_rect(void)
     RECT r; int width, height, button_width;
     _viv_viewport_rect(&r);
     width = r.right - r.left;
-    height = r.bottom - r.top - _viv_get_status_high() - _viv_get_controls_high();
+    height = r.bottom - r.top;
     button_width = width < 260 ? width - 32 : 220;
     if(button_width < 32) button_width = 32;
     r.left += (width - button_width) / 2;
@@ -4802,7 +4802,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 			
 			_viv_viewport_rect(&rect);
 			wide = rect.right - rect.left;
-			high = rect.bottom - rect.top - _viv_get_status_high() - _viv_get_controls_high();
+			high = rect.bottom - rect.top;
 
 			if (BeginPaint(hwnd,&ps))
 			{
@@ -7232,7 +7232,7 @@ static void _viv_view_set(int view_x,int view_y,int invalidate)
 	
 	_viv_viewport_rect(&rect);
 	wide = rect.right - rect.left;
-	high = rect.bottom - rect.top - _viv_get_status_high() - _viv_get_controls_high();
+	high = rect.bottom - rect.top;
 
 	_viv_get_render_size(&rw,&rh);
 /*		
@@ -7797,7 +7797,7 @@ static void _viv_get_render_size(int *prw,int *prh)
 {
     RECT rect;_viv_viewport_rect(&rect);
     int fill_window=_viv_is_fullscreen?config_fullscreen_fill_window:config_fill_window;
-    _viv_render_size_in_area(rect.right-rect.left,rect.bottom-rect.top-_viv_get_status_high()-_viv_get_controls_high(),fill_window,prw,prh);
+    _viv_render_size_in_area(rect.right-rect.left,rect.bottom-rect.top,fill_window,prw,prh);
 }
 
 static void _viv_set_custom_rate(void)
@@ -12369,7 +12369,7 @@ static void _viv_zoom_in(int out,int have_xy,int x,int y)
 		RECT rect;
 		_viv_viewport_rect(&rect);
 		pt.x = (rect.right - rect.left) / 2;
-		pt.y = (rect.bottom - rect.top - _viv_get_status_high() - _viv_get_controls_high()) / 2;
+		pt.y = (rect.bottom - rect.top) / 2;
 	}
 
 	ClientToScreen(_viv_hwnd,&pt);
@@ -14132,7 +14132,7 @@ static void _viv_update_1to1_scroll(int x,int y)
 	_viv_viewport_rect(&rect);
 
 	wide = rect.right - rect.left;
-	high = rect.bottom - rect.top - _viv_get_status_high() - _viv_get_controls_high();
+	high = rect.bottom - rect.top;
 	
 	pt.x = x ;
 	pt.y = y;
@@ -14476,7 +14476,7 @@ static void _viv_do_mousewheel_action(int action,int delta,int x,int y)
 		
 		_viv_viewport_rect(&rect);
 		wide = rect.right - rect.left;
-		high = rect.bottom - rect.top - _viv_get_status_high() - _viv_get_controls_high();
+		high = rect.bottom - rect.top;
 		
 		pt.x = x;
 		pt.y = y;
@@ -15813,7 +15813,7 @@ static void _viv_do_left_click_action(int action)
 				
 				_viv_viewport_rect(&rect);
 				wide = rect.right - rect.left;
-				high = rect.bottom - rect.top - _viv_get_status_high() - _viv_get_controls_high();
+				high = rect.bottom - rect.top;
 
 				_viv_get_render_size(&rw,&rh);
 
@@ -16098,7 +16098,7 @@ static BOOL _viv_get_src_pixel_pos(int client_x,int client_y,POINT *out_pixel_pt
 	
 	_viv_viewport_rect(&client_rect);
 	wide = client_rect.right - client_rect.left;
-	high = client_rect.bottom - client_rect.top - _viv_get_status_high() - _viv_get_controls_high();
+	high = client_rect.bottom - client_rect.top;
 
 	if (_viv_frame_count)
 	{
@@ -16139,7 +16139,7 @@ static void _viv_get_src_pixel_rgb(int src_x,int src_y,COLORREF *out_colorref)
 	
 	_viv_viewport_rect(&client_rect);
 	wide = client_rect.right - client_rect.left;
-	high = client_rect.bottom - client_rect.top - _viv_get_status_high() - _viv_get_controls_high();
+	high = client_rect.bottom - client_rect.top;
 
 	if (_viv_frame_count)
 	{
