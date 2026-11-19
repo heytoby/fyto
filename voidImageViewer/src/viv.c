@@ -1477,6 +1477,12 @@ typedef struct _viv_render_slot_s
 {
     wchar_t name[STRING_SIZE];
     int frame;
+    /* Identity of the file this bitmap was rendered from. A path alone is not
+       a cache key: the same name is a different image once the file is edited,
+       replaced or re-exported, and handing back the old pixels under the new
+       file's name is exactly the bug this guards against. */
+    DWORD size_high, size_low;
+    FILETIME write_time;
     int wide, high;
     int image_wide, image_high;
     int source_wide;
@@ -1486,6 +1492,13 @@ typedef struct _viv_render_slot_s
 
 static _viv_render_slot_t _viv_render_slots[FYTO_RENDER_SLOTS];
 static DWORD _viv_render_stamp;
+
+static BOOL _viv_render_same_file(const _viv_render_slot_t *slot, const WIN32_FIND_DATA *file)
+{
+    return slot->size_high == file->nFileSizeHigh &&
+        slot->size_low == file->nFileSizeLow &&
+        CompareFileTime(&slot->write_time, &file->ftLastWriteTime) == 0;
+}
 
 static HBITMAP _viv_copy_bitmap(HBITMAP source, int wide, int high)
 {
@@ -1526,14 +1539,16 @@ static HBITMAP _viv_copy_bitmap(HBITMAP source, int wide, int high)
     return copy;
 }
 
-static _viv_render_slot_t *_viv_render_find(const wchar_t *name, int frame, int wide, int high)
+static _viv_render_slot_t *_viv_render_find(const wchar_t *name, const WIN32_FIND_DATA *file,
+    int frame, int wide, int high)
 {
     int i;
     for (i = 0; i < FYTO_RENDER_SLOTS; i++)
     {
         _viv_render_slot_t *slot = &_viv_render_slots[i];
         if (slot->hbitmap && slot->frame == frame && slot->wide == wide &&
-            slot->high == high && wcscmp(slot->name, name) == 0)
+            slot->high == high && _viv_render_same_file(slot, file) &&
+            wcscmp(slot->name, name) == 0)
         {
             slot->used = ++_viv_render_stamp;
             return slot;
@@ -1542,7 +1557,8 @@ static _viv_render_slot_t *_viv_render_find(const wchar_t *name, int frame, int 
     return NULL;
 }
 
-static _viv_render_slot_t *_viv_render_reserve(const wchar_t *name, int frame, int wide, int high)
+static _viv_render_slot_t *_viv_render_reserve(const wchar_t *name, const WIN32_FIND_DATA *file,
+    int frame, int wide, int high)
 {
     int i, free_slot = -1;
     _viv_render_slot_t *victim = NULL;
@@ -1570,6 +1586,9 @@ static _viv_render_slot_t *_viv_render_reserve(const wchar_t *name, int frame, i
     victim = &_viv_render_slots[free_slot];
     string_copy(victim->name, name);
     victim->frame = frame;
+    victim->size_high = file->nFileSizeHigh;
+    victim->size_low = file->nFileSizeLow;
+    victim->write_time = file->ftLastWriteTime;
     victim->wide = wide;
     victim->high = high;
     victim->image_wide = _viv_image_wide;
@@ -1580,15 +1599,19 @@ static _viv_render_slot_t *_viv_render_reserve(const wchar_t *name, int frame, i
 }
 
 // Hand out a copy of a displayed image so returning to one of the last images
-// paints at once instead of reading and decoding the file again.
-static BOOL _viv_render_restore(const wchar_t *path, _viv_preview_t *preview)
+// paints at once instead of reading and decoding the file again. Only the same
+// file (path + size + write time) and the first frame qualify: a recycled path
+// must never hand back another image's pixels.
+static BOOL _viv_render_restore(const WIN32_FIND_DATA *file, _viv_preview_t *preview)
 {
     int i;
     for (i = 0; i < FYTO_RENDER_SLOTS; i++)
     {
         _viv_render_slot_t *slot = &_viv_render_slots[i];
         HBITMAP copy;
-        if (!slot->hbitmap || wcscmp(slot->name, path) != 0) continue;
+        if (!slot->hbitmap || slot->frame != 0) continue;
+        if (!_viv_render_same_file(slot, file)) continue;
+        if (wcscmp(slot->name, file->cFileName) != 0) continue;
         copy = _viv_copy_bitmap(slot->hbitmap, slot->wide, slot->high);
         if (!copy) return FALSE;
         preview->hbitmap = copy;
@@ -1626,14 +1649,16 @@ static BOOL _viv_render_paint(HDC dst, HDC src, int mip_wide, int mip_high,
 {
     _viv_render_slot_t *slot;
     const wchar_t *name = _viv_presented_path();
+    const WIN32_FIND_DATA *file;
     HDC mem_dc;
     HGDIOBJ previous;
     BOOL painted = FALSE;
 
     if (!*name || wide < 8 || high < 8) return FALSE;
     if ((UINT64)wide * high > FYTO_RENDER_MAX_PIXELS) return FALSE;
+    file = _viv_frame_fd;
 
-    slot = _viv_render_find(name, _viv_frame_position, wide, high);
+    slot = _viv_render_find(name, file, _viv_frame_position, wide, high);
     if (slot && mip_wide > slot->source_wide && mip_wide >= wide)
     {
         DeleteObject(slot->hbitmap);
@@ -1644,7 +1669,7 @@ static BOOL _viv_render_paint(HDC dst, HDC src, int mip_wide, int mip_high,
     {
         int previous_mode;
         if (!allow_build) return FALSE;
-        slot = _viv_render_reserve(name, _viv_frame_position, wide, high);
+        slot = _viv_render_reserve(name, file, _viv_frame_position, wide, high);
         if (!slot) return FALSE;
         slot->hbitmap = fyto_image_dib(wide, high, 32, NULL);
         if (!slot->hbitmap) return FALSE;
@@ -2137,7 +2162,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
            bitmap painted for this file, so a return is instant instead of
            another read plus decode. The load below still upgrades it. */
         if (!cached.hbitmap && !_viv_is_slideshow && config_cache_last)
-            _viv_render_restore(fd->cFileName, &cached);
+            _viv_render_restore(fd, &cached);
 
         // Keep the neighbor ready while the displayed JPEG gains its full-resolution frame.
         preserve_preload = !_viv_active_load && _viv_preview.hbitmap &&
@@ -16008,6 +16033,10 @@ static void _viv_refresh(void)
 
 	// clear last cache
 	_viv_clear_last();
+
+	/* Refresh means "read the file again": drop the display-size copies too,
+	   otherwise the first paint after the reload is the old rendering. */
+	_viv_render_cache_clear();
 
 	// clear preload.
 	_viv_clear_loading_preload();
