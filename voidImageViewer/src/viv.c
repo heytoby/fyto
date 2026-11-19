@@ -1649,6 +1649,19 @@ static BOOL _viv_display_target_in_env(const _viv_display_env_t *env, int image_
     return *pw > 0 && *ph > 0;
 }
 
+// Ask for full resolution when the view needs it. A display prefetch only
+// holds a window-sized bitmap; 1:1 paints the source pixels.
+static void _viv_request_full_resolution(void)
+{
+    WIN32_FIND_DATA file;
+    if (!_viv_preview.hbitmap || _viv_frames || _viv_active_load) return;
+    if (!*_viv_frame_fd->cFileName) return;
+    if (_viv_preview.wide >= (UINT)_viv_image_wide &&
+        _viv_preview.high >= (UINT)_viv_image_high) return;
+    file = *_viv_frame_fd;
+    _viv_open(&file, 0);
+}
+
 // TRUE when a preview bitmap is exactly the size the window paints an image of
 // preview->image_wide x preview->image_high at. Such a preview is the finished
 // picture for the current view: do not scale it and do not replace it with a
@@ -10851,6 +10864,7 @@ static void _viv_toggle_fit_100(void)
  {
   _viv_explicit_fit = 0;
   _viv_1to1 = 1;
+  _viv_request_full_resolution();
  }
  _viv_zoom_pos = 0;
  _viv_have_old_zoom = 0;
@@ -10880,6 +10894,7 @@ static void _viv_view_1to1(void)
 	_viv_old_zoom_pos = _viv_zoom_pos;
 	
 	_viv_1to1 = 1;
+	_viv_request_full_resolution();
 	_viv_zoom_pos = 0;
 	_viv_view_set(_viv_view_x,_viv_view_y,1);
 	InvalidateRect(_viv_hwnd,0,FALSE);
