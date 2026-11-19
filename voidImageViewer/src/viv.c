@@ -11824,11 +11824,48 @@ static BOOL _viv_job_display_target(const _viv_load_job_t *job, int image_wide, 
     return TRUE;
 }
 
+// Post a prefetch preview at exactly the size the window will paint, reduced
+// from an already decoded (and already oriented) frame. Takes ownership of
+// *bitmap when it succeeds. FALSE means the caller still owns the frame.
+static BOOL _viv_reply_display_frame(_viv_load_job_t *job, HBITMAP *bitmap, int wide, int high)
+{
+    int target_wide = 0, target_high = 0;
+    HBITMAP reduced;
+    _viv_preview_t preview;
+
+    if (!job->display_prefetch || !*bitmap || wide < 1 || high < 1) return FALSE;
+    if (!_viv_job_display_target(job, wide, high, &target_wide, &target_high)) return FALSE;
+    if (target_wide >= wide && target_high >= high) return FALSE;
+    reduced = fyto_image_dib(target_wide, target_high, 32, NULL);
+    if (!reduced || !_viv_box_scale(*bitmap, wide, high, reduced, target_wide, target_high))
+    {
+        if (reduced) DeleteObject(reduced);
+        return FALSE;
+    }
+    DeleteObject(*bitmap);
+    *bitmap = NULL;
+    if (_viv_load_stop_state(job) == _VIV_LOAD_DISCARD)
+    {
+        DeleteObject(reduced);
+        return TRUE;
+    }
+    preview.hbitmap = reduced;
+    preview.wide = target_wide;
+    preview.high = target_high;
+    preview.image_wide = wide;
+    preview.image_high = high;
+    preview.defer_detail = TRUE;
+    preview.display = TRUE;
+    job->preview_only = TRUE;
+    _viv_reply_add(job, _VIV_REPLY_LOAD_IMAGE_PREVIEW, sizeof(preview), &preview);
+    return TRUE;
+}
+
 // Decode a JPEG straight to the size the window will paint and post it as the
 // preview. The DCT scale chosen is the smallest one that still covers the
 // target, so a 24 MP photo costs a 1/4 decode instead of a full one and the
-// result needs no scaling on the UI thread. Only plain (non-rotated) RGB images
-// that libjpeg can decode are handled; everything else keeps the old path.
+// result needs no scaling on the UI thread. Rotated images and ICC profiles
+// libjpeg cannot apply keep the ordinary path (the frame is reduced afterwards).
 static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg, int orientation)
 {
     UINT target_wide = 0, target_high = 0, decode_wide, decode_high, denominator = 0;
@@ -11968,7 +12005,13 @@ static BOOL _viv_load_fast_jpeg(_viv_load_job_t *job, IStream *stream, int *know
         {
             frame->frame.hbitmap = fyto_jpeg_full(&jpeg, orientation, &frame->wide, &frame->high);
             if (frame->frame.hbitmap)
-                loaded = _viv_reply_still_frame(job, frame);
+            {
+                if (_viv_reply_display_frame(job, &frame->frame.hbitmap,
+                    (int)frame->wide, (int)frame->high))
+                    loaded = TRUE;
+                else
+                    loaded = _viv_reply_still_frame(job, frame);
+            }
         }
     }
 
