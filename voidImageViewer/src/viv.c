@@ -1290,6 +1290,106 @@ HMODULE LoadUnicowsProc(void)
 	return NULL;
 }
 
+// Fit an image inside an area. This is the single place that decides how big
+// a displayed image is: the UI thread uses it to paint, and the decode thread
+// uses it to pre-render a prefetch at exactly the size the window will show,
+// so the two can never drift apart. Pure: safe to call from the decode thread.
+static void _viv_display_fit_box(int area_wide, int area_high, int image_wide, int image_high,
+    int fill_window, int keep_aspect, int allow_shrink, int *prw, int *prh)
+{
+    int rw, rh;
+    if (area_wide < 1 || area_high < 1 || image_wide < 1 || image_high < 1)
+    {
+        *prw = 0;
+        *prh = 0;
+        return;
+    }
+
+    if (keep_aspect)
+    {
+        if ((area_high * image_wide) / image_high < area_wide)
+        {
+            // tall image.
+            // add image_high - 1 so when we resize the window to 50% it stretches to the screen edges correctly.
+            rh = area_high;
+            rw = ((area_high * (__int64)image_wide) + image_high - 1) / image_high;
+
+            // make sure we have some width.
+            if (rw <= 0)
+            {
+                rw = 1;
+            }
+        }
+        else
+        {
+            // long image.
+            // add image_wide - 1 so when we resize the window to 50% it stretches to the screen edges correctly.
+            rw = area_wide;
+            rh = ((area_wide * (__int64)image_high) + image_wide - 1) / image_wide;
+
+            // make sure we have some height
+            if (rh <= 0)
+            {
+                rh = 1;
+            }
+        }
+
+        if (!fill_window)
+        {
+            if ((rw > image_wide) || (rh > image_high))
+            {
+                rw = image_wide;
+                rh = image_high;
+            }
+        }
+    }
+    else
+    {
+        rw = area_wide;
+        rh = area_high;
+
+        if (!fill_window)
+        {
+            if (rw > image_wide)
+            {
+                rw = image_wide;
+            }
+
+            if (rh > image_high)
+            {
+                rh = image_high;
+            }
+        }
+    }
+
+    if (!allow_shrink)
+    {
+        if (keep_aspect)
+        {
+            if ((rw < image_wide) || (rh < image_high))
+            {
+                rw = image_wide;
+                rh = image_high;
+            }
+        }
+        else
+        {
+            if (rw < image_wide)
+            {
+                rw = image_wide;
+            }
+
+            if (rh < image_high)
+            {
+                rh = image_high;
+            }
+        }
+    }
+
+    *prw = rw;
+    *prh = rh;
+}
+
 // EXIF reserves a side panel; the original viewer chrome and coordinates are retained.
 static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);r->bottom-=_viv_get_status_high()+_viv_get_controls_high();if(r->bottom<0)r->bottom=0;}
 // fyto's own theme is light/dark for the canvas, but its dialogs are always the
@@ -8201,89 +8301,8 @@ static void _viv_render_size_in_area(int wide,int high,int fill_window,int *prw,
   return;
  }
 
-	if (config_keep_aspect_ratio)
-	{
-		if ((high * _viv_image_wide) / _viv_image_high < wide)
-		{
-			// tall image.
-			// add  _viv_image_high - 1 so when we resize the window to 50% it stretches to the screen edges correctly.
-			rh = high;
-			rw = ((high * (__int64)_viv_image_wide) + _viv_image_high - 1) / _viv_image_high;
-
-			// make sure we have some width.			
-			if (rw <= 0)
-			{
-				rw = 1;
-			}
-		}
-		else
-		{
-			// long image.
-			// add _viv_image_wide - 1 so when we resize the window to 50% it stretches to the screen edges correctly.
-			rw = wide;
-			rh = ((wide * (__int64)_viv_image_high) + _viv_image_wide - 1) / _viv_image_wide;
-
-			// make sure we have some height	
-			if (rh <= 0)
-			{
-				rh = 1;
-			}
-		}
-
-		if (!fill_window)
-		{
-			if ((rw > _viv_image_wide) || (rh > _viv_image_high))
-			{
-				rw = _viv_image_wide;
-				rh = _viv_image_high;
-			}
-		}
-	}
-	else
-	{
-		rw = wide;
-		rh = high;
-
-		if (!fill_window)
-		{
-			if (rw > _viv_image_wide)
-			{
-				rw = _viv_image_wide;
-			}			
-	
-			if (rh > _viv_image_high)
-			{
-				rh = _viv_image_high;
-			}
-		}
-	}
-
-//	debug_printf("GET_RENDER_SIZE wide %d high %d rw %d rh %d fill_window %d\n",wide,high,rw,rh,fill_window);
-
-	if (!config_allow_shrinking)
-	{
-		if (config_keep_aspect_ratio)
-		{
-			if ((rw < _viv_image_wide) || (rh < _viv_image_high))
-			{
-				rw = _viv_image_wide;
-				rh = _viv_image_high;
-			}
-		}
-		else
-		{
-			if (rw < _viv_image_wide)
-			{
-				rw = _viv_image_wide;
-			}
-
-			if (rh < _viv_image_high)
-			{
-				rh = _viv_image_high;
-			}
-		}
-	}		
-	
+	_viv_display_fit_box(wide, high, (int)_viv_image_wide, (int)_viv_image_high,
+		fill_window, config_keep_aspect_ratio, config_allow_shrinking, &rw, &rh);
 	if (config_keep_aspect_ratio)
 	{
 		if (rw > _viv_image_wide)
