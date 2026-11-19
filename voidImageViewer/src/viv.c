@@ -17200,6 +17200,17 @@ static int _viv_clamp_zoom_pos(int zoom_pos)
 // the caller must fall back to a normal load (the preload has been discarded).
 static BOOL _viv_open_preload(void)
 {
+    /* A display-size prefetch rendered for a window size that no longer holds
+       is stale: drop it instead of painting it as if it were exact. Check this
+       before touching the running decode, so a stale prefetch costs nothing. */
+    if (_viv_preload_preview.hbitmap && _viv_preload_preview.display &&
+        !_viv_preview_matches_fit(&_viv_preload_preview))
+    {
+        _viv_clear_preload();
+        _viv_load_is_preload = 0;
+        return FALSE;
+    }
+
     /* A decode of a different file must not publish its frame over the image we
        are about to show. Retire it: it keeps running at low priority and its
        replies are dropped. */
@@ -17222,16 +17233,6 @@ static BOOL _viv_open_preload(void)
         }
     }
 	os_copy_memory(_viv_current_fd,_viv_preload_fd,sizeof(WIN32_FIND_DATA));
-
-    /* A display-size prefetch rendered for a window size that no longer holds
-       is stale: drop it instead of painting it as if it were exact. */
-    if (_viv_preload_preview.hbitmap && _viv_preload_preview.display &&
-        !_viv_preview_matches_fit(&_viv_preload_preview))
-    {
-        _viv_clear_preload();
-        _viv_load_is_preload = 0;
-        return FALSE;
-    }
 
     if (!_viv_active_load && _viv_preload_preview.hbitmap && !_viv_preload_frames)
     {
@@ -17284,6 +17285,15 @@ static BOOL _viv_open_preload(void)
 	else
 	if (_viv_preload_state == 1)
 	{
+		// loaded
+		if (!_viv_preload_frames && !_viv_preload_preview.hbitmap)
+		{
+			// Nothing was actually produced (cancelled/failed between replies):
+			// fall back to a normal load instead of showing an empty frame.
+			_viv_load_is_preload = 0;
+			return FALSE;
+		}
+
 		// save current image to last image.
 		viv_copy_current_image_to_last_image();
 
