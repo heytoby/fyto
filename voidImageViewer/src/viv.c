@@ -10854,7 +10854,9 @@ static void _viv_update_ontop(void)
     if (displayed_pin!=(config_ontop==1))
     {
         displayed_pin=config_ontop==1;
-        RedrawWindow(_viv_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_FRAME);
+        /* The pin is drawn in the non-client area; the client image does not
+           change, so repaint only the frame. */
+        RedrawWindow(_viv_hwnd,NULL,NULL,RDW_FRAME);
     }
 }
 
