@@ -338,6 +338,11 @@ typedef struct _viv_load_job_s
     int render_wide, render_high;
     BOOL use_icm, use_orientation;
     BOOL prefetch, have_preview, preview_only, defer_jpeg_detail;
+    /* Display-size prefetch: render the bitmap at exactly the window fit size
+       instead of decoding a full-resolution frame. The fit settings are copied
+       from the window when the job is created, so the decode thread never
+       reads UI state. */
+    BOOL display_prefetch, fit_fill_window, fit_keep_aspect, fit_allow_shrink;
     UINT64 prefetch_pixels;
     volatile LONG stop, promoted;
 } _viv_load_job_t;
@@ -398,6 +403,11 @@ typedef struct _viv_preview_s
     UINT wide, high; // raster size
     UINT image_wide, image_high; // original size after EXIF orientation
     BOOL defer_detail;
+    /* The raster is exactly the size the window paints this image at, built by
+       a prefetch. It needs no scaling on the UI thread and must not be replaced
+       by a full frame of the same size (that would only make the picture
+       wobble); full resolution is kept for zoom/copy/print. */
+    BOOL display;
 } _viv_preview_t;
 
 typedef struct _viv_playlist_s
@@ -660,7 +670,7 @@ static BOOL _viv_StretchBltStitch(HDC hdcDest,int xDest,int yDest,int wDest,int 
 static BOOL _viv_get_src_pixel_pos(int client_x,int client_y,POINT *out_src_pt);
 static void _viv_get_src_pixel_rgb(int src_x,int src_y,COLORREF *out_colorref);
 static int _viv_clamp_zoom_pos(int zoom_pos);
-static void _viv_open_preload(void);
+static BOOL _viv_open_preload(void);
 //static void _viv_get_tooltip(void);
 //static void _viv_tooltip_hide(void);
 //static void _viv_tooltip_update(void);
@@ -1392,6 +1402,29 @@ static void _viv_display_fit_box(int area_wide, int area_high, int image_wide, i
 
 // EXIF reserves a side panel; the original viewer chrome and coordinates are retained.
 static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);r->bottom-=_viv_get_status_high()+_viv_get_controls_high();if(r->bottom<0)r->bottom=0;}
+// TRUE when a preview bitmap is exactly the size the window paints an image of
+// preview->image_wide x preview->image_high at. Such a preview is the finished
+// picture for the current view: do not scale it and do not replace it with a
+// full frame. A prefetch built for another window size is rejected here.
+// UI thread only.
+static BOOL _viv_preview_matches_fit(const _viv_preview_t *preview)
+{
+    RECT rect;
+    int rw, rh, fill_window;
+
+    if (!preview || !preview->hbitmap || !preview->image_wide || !preview->image_high) return FALSE;
+    if (_viv_1to1 || _viv_doing == _VIV_DOING_1TO1SCROLL || _viv_zoom_pos || _viv_explicit_fit) return FALSE;
+    _viv_viewport_rect(&rect);
+    if (rect.right - rect.left < 8 || rect.bottom - rect.top < 8) return FALSE;
+    fill_window = _viv_is_fullscreen ? config_fullscreen_fill_window : config_fill_window;
+    _viv_display_fit_box(rect.right - rect.left, rect.bottom - rect.top,
+        (int)preview->image_wide, (int)preview->image_high, fill_window,
+        config_keep_aspect_ratio, config_allow_shrinking, &rw, &rh);
+    if (rw > (int)preview->image_wide) rw = (int)preview->image_wide;
+    if (rh > (int)preview->image_high) rh = (int)preview->image_high;
+    return rw > 0 && rh > 0 && rw == (int)preview->wide && rh == (int)preview->high;
+}
+
 // fyto's own theme is light/dark for the canvas, but its dialogs are always the
 // native light ones. Windows would otherwise hand them the system dark frame
 // (and some builds render the whole dialog dark), so opt the process into light
@@ -2451,9 +2484,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 	else
 	if ((!is_preload) && (_viv_load_is_preload) && (*_viv_preload_fd->cFileName) && _viv_same_image(_viv_preload_fd, fd))
 	{
-		_viv_open_preload();
-
-		return;
+		if (_viv_open_preload()) return;
 	}
 	else
 	if ((!is_preload) && (_viv_load_image_thread) && (!_viv_load_image_terminate) && (_viv_load_image_filename) && _viv_same_image(_viv_load_fd, fd))
@@ -2555,6 +2586,16 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
             UINT frames = max(1, _viv_frame_count);
             job->prefetch_pixels = pixels <= budget / frames ? budget - pixels * frames : 0;
         }
+        /* A display-size prefetch is only meaningful in the plain fit view;
+           when the user has zoomed, the existing frame prefetch (with its mipmap
+           chain) is the better guess. */
+        job->display_prefetch = is_preload && config_preload_next && !_viv_is_slideshow &&
+            !_viv_zoom_pos && !_viv_1to1 && !_viv_explicit_fit &&
+            _viv_dst_zoom_x_pos == _VIV_DST_ZOOM_ONE &&
+            _viv_dst_zoom_y_pos == _VIV_DST_ZOOM_ONE;
+        job->fit_fill_window = _viv_is_fullscreen ? config_fullscreen_fill_window : config_fill_window;
+        job->fit_keep_aspect = config_keep_aspect_ratio;
+        job->fit_allow_shrink = config_allow_shrinking;
         job->have_preview = cached.hbitmap ||
             (!is_preload && _viv_preview.hbitmap && _viv_same_image(_viv_frame_fd, fd));
         _viv_active_load = job;
@@ -4070,7 +4111,12 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 							_viv_toolbar_update_buttons();
 							
 							// preload next
-							if (allow_preload_next || _viv_preview.defer_detail)
+							/* A completed prefetch must not start another prefetch of
+							   the same neighbour just because a detail decode is
+							   pending: that only repeats work and replaces the
+							   display bitmap with an identical one. */
+							if (allow_preload_next ||
+								(_viv_preview.defer_detail && !_viv_load_is_preload))
 							{
 								_viv_preload_next();
 							}
@@ -4090,10 +4136,19 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
                             }
                             else if (string_compare(_viv_load_fd->cFileName, _viv_requested_fd.cFileName) == 0)
                             {
-                                _viv_load_is_preload = 0;
-                                _viv_should_activate_preload_on_load = 0;
-                                _viv_clear_preload();
-                                _viv_show_preview(preview, _viv_load_fd);
+                                if (preview->display && !_viv_preview_matches_fit(preview))
+                                {
+                                    /* Rendered for a window size that no longer
+                                       holds: let the load finish and fall back to
+                                       a full decode instead of showing it. */
+                                }
+                                else
+                                {
+                                    _viv_load_is_preload = 0;
+                                    _viv_should_activate_preload_on_load = 0;
+                                    _viv_clear_preload();
+                                    _viv_show_preview(preview, _viv_load_fd);
+                                }
                             }
                         }
                         break;
@@ -4173,7 +4228,17 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
                                         _viv_image_wide == (int)first_frame->wide &&
                                         _viv_image_high == (int)first_frame->high &&
                                         string_compare(_viv_frame_fd->cFileName, _viv_load_fd->cFileName) == 0;
-                                    if (replace_preview)
+                                    /* Keep the picture that is already on screen when it
+                                       is exactly the size we paint at: the frame is only
+                                       needed for zoom/copy/print, and repainting it from a
+                                       different source would make the picture wobble. */
+                                    BOOL keep_display = replace_preview &&
+                                        _viv_preview_matches_fit(&_viv_preview);
+                                    if (keep_display)
+                                    {
+                                        _viv_preview.defer_detail = FALSE;
+                                    }
+                                    else if (replace_preview)
                                         _viv_clear_preview();
                                     else
                                     {
@@ -4194,7 +4259,12 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 									first_frame->frame.mipmap = NULL;
 									_viv_frame_loaded_count = 1;
 
-                                    if (replace_preview)
+                                    if (keep_display)
+                                    {
+                                        /* Nothing changed on screen; the status bar is
+                                           refreshed when the load completes. */
+                                    }
+                                    else if (replace_preview)
                                     {
                                         _viv_status_update();
                                         InvalidateRect(_viv_hwnd, NULL, FALSE);
@@ -4368,6 +4438,13 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 
                 case FYTO_JPEG_DETAIL_TIMER:
                     if (GetTickCount() - _viv_jpeg_detail_started < FYTO_JPEG_DETAIL_DELAY) break;
+                    /* Let the neighbour prefetch finish first: starting a full
+                       decode now would cancel it and the next step would miss. */
+                    if (_viv_active_load && _viv_load_is_preload)
+                    {
+                        _viv_jpeg_detail_started = GetTickCount();
+                        break;
+                    }
                     KillTimer(hwnd, FYTO_JPEG_DETAIL_TIMER);
                     if (_viv_preview.defer_detail)
                     {
@@ -5526,8 +5603,10 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 							int mip_high;
 							
 debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
-							if (_viv_preview.hbitmap)
-                            {
+							if (_viv_preview.hbitmap &&
+								(_viv_preview_matches_fit(&_viv_preview) ||
+								 !_viv_frames || !_viv_frames[_viv_frame_position].hbitmap))
+							{
                                 mip_hbitmap = _viv_preview.hbitmap;
                                 mip_wide = _viv_preview.wide;
                                 mip_high = _viv_preview.high;
@@ -5545,7 +5624,14 @@ debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
 								{
 									if ((rw == mip_wide) && (rh == mip_high))
 									{
-										if (!_viv_render_paint(ps.hdc, mem_hdc, mip_wide, mip_high, rx, ry, rw, rh, TRUE))
+										/* The display-size preview is already the final
+										   bitmap for this paint: blit it directly instead
+										   of first copying it into a render slot. */
+										if (mip_hbitmap == _viv_preview.hbitmap)
+										{
+											BitBlt(ps.hdc,rx,ry,rw,rh,mem_hdc,0,0,SRCCOPY);
+										}
+										else if (!_viv_render_paint(ps.hdc, mem_hdc, mip_wide, mip_high, rx, ry, rw, rh, TRUE))
 										{
 										if (BitBlt(ps.hdc,rx,ry,rw,rh,mem_hdc,0,0,SRCCOPY))
 										{
@@ -11631,6 +11717,97 @@ static BOOL _viv_reply_still_frame(_viv_load_job_t *job, _viv_reply_load_image_f
     return FALSE;
 }
 
+#ifdef FYTO_HAVE_TURBO_JPEG
+// Exact size the UI will paint an image of this size at, clamped so a prefetch
+// never upscales. FALSE when this job did not ask for a display-size bitmap.
+// Decode thread: reads only job fields.
+static BOOL _viv_job_display_target(const _viv_load_job_t *job, int image_wide, int image_high,
+    int *target_wide, int *target_high)
+{
+    int wide, high;
+    if (!job->display_prefetch || image_wide < 1 || image_high < 1) return FALSE;
+    _viv_display_fit_box(job->render_wide, job->render_high, image_wide, image_high,
+        job->fit_fill_window, job->fit_keep_aspect, job->fit_allow_shrink, &wide, &high);
+    if (!wide || !high) return FALSE;
+    if (wide > image_wide) wide = image_wide;
+    if (high > image_high) high = image_high;
+    *target_wide = wide;
+    *target_high = high;
+    return TRUE;
+}
+
+// Decode a JPEG straight to the size the window will paint and post it as the
+// preview. The DCT scale chosen is the smallest one that still covers the
+// target, so a 24 MP photo costs a 1/4 decode instead of a full one and the
+// result needs no scaling on the UI thread. Only plain (non-rotated) RGB images
+// that libjpeg can decode are handled; everything else keeps the old path.
+static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg, int orientation)
+{
+    UINT target_wide = 0, target_high = 0, decode_wide, decode_high, denominator = 0;
+    UINT wide = 0, high = 0;
+    HBITMAP bitmap, scaled;
+    _viv_preview_t preview;
+
+    if (!job->display_prefetch || orientation > 1) return FALSE;
+    if (jpeg->icc.state == FYTO_ICC_UNSUPPORTED) return FALSE;
+    if (!_viv_job_display_target(job, (int)jpeg->wide, (int)jpeg->high,
+        (int *)&target_wide, (int *)&target_high)) return FALSE;
+    /* Nothing to downscale: the ordinary preview/full path is just as good. */
+    if ((UINT64)target_wide * target_high >= (UINT64)jpeg->wide * jpeg->high) return FALSE;
+
+    {
+        UINT d;
+        for (d = 8; d >= 1; d >>= 1)
+        {
+            decode_wide = (jpeg->wide + d - 1) / d;
+            decode_high = (jpeg->high + d - 1) / d;
+            if (decode_wide >= target_wide && decode_high >= target_high)
+            {
+                denominator = d;
+                break;
+            }
+        }
+    }
+    if (!denominator) return FALSE;
+
+    bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
+        jpeg->wide, jpeg->high, denominator, 32, &wide, &high,
+        jpeg->cancelled, jpeg->cancel_context);
+    if (!bitmap) return FALSE;
+    scaled = bitmap;
+    if (wide != target_wide || high != target_high)
+    {
+        scaled = fyto_image_dib(target_wide, target_high, 32, NULL);
+        if (!scaled ||
+            !_viv_box_scale(bitmap, (int)wide, (int)high, scaled, (int)target_wide, (int)target_high))
+        {
+            if (scaled) DeleteObject(scaled);
+            DeleteObject(bitmap);
+            return FALSE;
+        }
+        DeleteObject(bitmap);
+    }
+    fyto_icc_apply_bitmap(jpeg, scaled);
+    if (_viv_load_stop_state(job) == _VIV_LOAD_DISCARD)
+    {
+        DeleteObject(scaled);
+        return TRUE;
+    }
+    preview.hbitmap = scaled;
+    preview.wide = target_wide;
+    preview.high = target_high;
+    preview.image_wide = jpeg->wide;
+    preview.image_high = jpeg->high;
+    /* Full resolution is decoded after the image has been idle for a moment
+       (or immediately when the user zooms in), never on the navigation path. */
+    preview.defer_detail = TRUE;
+    preview.display = TRUE;
+    job->preview_only = TRUE;
+    _viv_reply_add(job, _VIV_REPLY_LOAD_IMAGE_PREVIEW, sizeof(preview), &preview);
+    return TRUE;
+}
+#endif
+
 static BOOL _viv_load_fast_jpeg(_viv_load_job_t *job, IStream *stream, int *known_orientation, _viv_reply_load_image_first_frame_t *frame)
 {
     fyto_wic_image jpeg = {0};
@@ -11646,7 +11823,14 @@ static BOOL _viv_load_fast_jpeg(_viv_load_job_t *job, IStream *stream, int *know
         int orientation = job->use_orientation ? fyto_jpeg_orientation(&jpeg) : 0;
         if (orientation < 0) orientation = os_get_orientation(job->filename);
         *known_orientation = orientation;
+#ifdef FYTO_HAVE_TURBO_JPEG
         if (!job->have_preview && !_viv_load_stop_state(job) &&
+            _viv_jpeg_display_preview(job, &jpeg, orientation))
+        {
+            loaded = TRUE;
+        }
+#endif
+        if (!loaded && !job->have_preview && !_viv_load_stop_state(job) &&
             (reduce || (UINT64)jpeg.wide * jpeg.high >= 8000000))
         {
             _viv_preview_t preview = {0};
@@ -16866,14 +17050,43 @@ static int _viv_clamp_zoom_pos(int zoom_pos)
 	return zoom_pos;
 }
 
-static void _viv_open_preload(void)
+// Show the preloaded image. Returns FALSE when the preload cannot be used and
+// the caller must fall back to a normal load (the preload has been discarded).
+static BOOL _viv_open_preload(void)
 {
-    if (_viv_load_image_thread)
+    /* A decode of a different file must not publish its frame over the image we
+       are about to show. Retire it: it keeps running at low priority and its
+       replies are dropped. */
+    if (_viv_active_load)
     {
-        InterlockedExchange(&_viv_active_load->promoted, 1);
-        SetThreadPriority(_viv_load_image_thread, THREAD_PRIORITY_NORMAL);
+        if (_viv_same_image(_viv_load_fd, _viv_preload_fd))
+        {
+            InterlockedExchange(&_viv_active_load->promoted, 1);
+            if (_viv_active_load->thread)
+                SetThreadPriority(_viv_active_load->thread, THREAD_PRIORITY_NORMAL);
+        }
+        else
+        {
+            if (_viv_retired_load) return FALSE;
+            _viv_cancel_load(FALSE);
+            if (_viv_active_load->thread)
+                SetThreadPriority(_viv_active_load->thread, THREAD_PRIORITY_BELOW_NORMAL);
+            _viv_retired_load = _viv_active_load;
+            _viv_active_load = NULL;
+        }
     }
 	os_copy_memory(_viv_current_fd,_viv_preload_fd,sizeof(WIN32_FIND_DATA));
+
+    /* A display-size prefetch rendered for a window size that no longer holds
+       is stale: drop it instead of painting it as if it were exact. */
+    if (_viv_preload_preview.hbitmap && _viv_preload_preview.display &&
+        !_viv_preview_matches_fit(&_viv_preload_preview))
+    {
+        _viv_clear_preload();
+        _viv_load_is_preload = 0;
+        return FALSE;
+    }
+
     if (!_viv_active_load && _viv_preload_preview.hbitmap && !_viv_preload_frames)
     {
         WIN32_FIND_DATA file = *_viv_preload_fd;
@@ -16882,9 +17095,9 @@ static void _viv_open_preload(void)
         _viv_clear_preload();
         if (_viv_preview.defer_detail) _viv_preload_next();
         else _viv_open(&file, 0);
-        return;
+        return TRUE;
     }
-	
+
 	if (_viv_preload_state == 0)
 	{
 		// loading...
@@ -16914,11 +17127,11 @@ static void _viv_open_preload(void)
 			if (!_viv_should_activate_preload_on_load)
 			{
 				_viv_should_activate_preload_on_load = 1;
-			
+
 				// show loading...
 				_viv_status_update();
 			}
-			
+
 			debug_printf("STILL LOADING...\n");
 		}
 	}
@@ -16932,9 +17145,9 @@ static void _viv_open_preload(void)
 		// preload next below..
 		_viv_load_is_preload = 0;
 		_viv_status_update();
-		
+
 		_viv_activate_preload();
-		
+
 		_viv_preload_next();
 	}
 	else
@@ -16947,15 +17160,16 @@ static void _viv_open_preload(void)
 		_viv_load_failed = 1;
 		_viv_load_is_preload = 0;
 		_viv_status_update();
-		
+
 		_viv_clear();
-		
+
 		_viv_start_first_frame();
-		
+
 		_viv_process_pending_clear();
-		
+
 		_viv_preload_next();
-	}	
+	}
+    return TRUE;
 }
 
 /*
