@@ -6624,23 +6624,43 @@ static int _viv_main(int nCmdShow)
 }
 
 
-// Mouse wheel anywhere on the monitor while this window is the foreground one.
-// WM_MOUSEWHEEL alone only arrives when the cursor is over the window.
+// Wheel over fyto's own windows while fyto is the foreground window.
+// The wheel already reaches us by itself when the cursor is over our window, so
+// this only has to cover our own popups/menus that sit outside our rectangle.
+// A low-level hook is global: anything aimed at another application, the
+// taskbar or another monitor must never be swallowed, so we only steal the
+// event when the cursor is over a window of this very process.
 static HHOOK _viv_wheel_hook;
 static LRESULT CALLBACK _viv_wheel_hook_proc(int code,WPARAM wparam,LPARAM lparam)
 {
-    if(code==HC_ACTION && wparam==WM_MOUSEWHEEL && _viv_hwnd && GetForegroundWindow()==_viv_hwnd)
+    MSLLHOOKSTRUCT *ms;
+    HWND target;
+    DWORD target_pid;
+    RECT r;
+
+    if(code!=HC_ACTION || wparam!=WM_MOUSEWHEEL || !_viv_hwnd)return CallNextHookEx(NULL,code,wparam,lparam);
+
+    ms=(MSLLHOOKSTRUCT *)lparam;
+
+    if(GetForegroundWindow()!=_viv_hwnd)return CallNextHookEx(NULL,code,wparam,lparam);
+
+    target=WindowFromPoint(ms->pt);
+    if(target)
     {
-        MSLLHOOKSTRUCT *ms=(MSLLHOOKSTRUCT *)lparam;
-        RECT r;
-        if(GetWindowRect(_viv_hwnd,&r) && !PtInRect(&r,ms->pt))
-        {
-            UINT delta=(UINT)(SHORT)HIWORD(ms->mouseData);
-            PostMessageW(_viv_hwnd,WM_MOUSEWHEEL,MAKEWPARAM(0,delta),MAKELPARAM(ms->pt.x,ms->pt.y));
-            return 1;
-        }
+        target_pid=0;
+        GetWindowThreadProcessId(target,&target_pid);
+
+        // another application, the taskbar or another monitor: not ours to take.
+        if(target_pid!=GetCurrentProcessId())return CallNextHookEx(NULL,code,wparam,lparam);
+
+        // our own main window: the system already delivers this one to us.
+        if(target==_viv_hwnd)return CallNextHookEx(NULL,code,wparam,lparam);
     }
-    return CallNextHookEx(NULL,code,wparam,lparam);
+
+    if(GetWindowRect(_viv_hwnd,&r) && PtInRect(&r,ms->pt))return CallNextHookEx(NULL,code,wparam,lparam);
+
+    PostMessageW(_viv_hwnd,WM_MOUSEWHEEL,MAKEWPARAM(0,(UINT)(SHORT)HIWORD(ms->mouseData)),MAKELPARAM(ms->pt.x,ms->pt.y));
+    return 1;
 }
 static void _viv_wheel_hook_install(void)
 {
