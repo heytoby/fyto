@@ -11053,7 +11053,15 @@ static void _viv_frame_skip(int size)
 					_viv_timer_tick = 0;
 				}
 
-				size -= _viv_frames[_viv_frame_position].delay;
+				/* A 0 ms frame must still consume the jump. When the loop cannot
+				   advance (frames still loading, position == last loaded) `size`
+				   would otherwise never change and the UI thread would spin here
+				   forever; the animation timer clamps the same value to 1 ms. */
+				{
+					DWORD delay = _viv_frames[_viv_frame_position].delay;
+					if (!delay) delay = 1;
+					size -= (int)delay;
+				}
 			}
 		}
 		else
@@ -11070,7 +11078,11 @@ static void _viv_frame_skip(int size)
 				_viv_animation_timer_tick_start = os_get_tick_count();
 				_viv_timer_tick = 0;
 				
-				size += _viv_frames[_viv_frame_position].delay;
+				{
+					DWORD delay = _viv_frames[_viv_frame_position].delay;
+					if (!delay) delay = 1;
+					size += (int)delay;
+				}
 			}
 		}
 			
@@ -11282,7 +11294,11 @@ static int _viv_webp_frame_proc(_viv_webp_t *viv_webp,BYTE *pixels,int delay)
 				
 				if (viv_webp->frame_count > 1)
 				{
-					first_frame.frame.delay = delay;
+					/* Zero-length frames are legal in the container. Keep every
+					   consumer away from a 0 ms delay: the timer would clamp it
+					   to 1 ms, and a 0 in the jump loop's delay accounting can
+					   make _viv_frame_skip spin. */
+					first_frame.frame.delay = delay > 0 ? (DWORD)delay : 1;
 				}
 
 				// preload first mipmap
@@ -11296,7 +11312,7 @@ static int _viv_webp_frame_proc(_viv_webp_t *viv_webp,BYTE *pixels,int delay)
 				
 				frame.hbitmap = hbitmap;
 				frame.mipmap = NULL;
-				frame.delay = delay;
+				frame.delay = delay > 0 ? (DWORD)delay : 1;
 				
 //printf("DELAY %d\n",delay)				;
 
