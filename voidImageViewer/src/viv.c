@@ -7416,17 +7416,17 @@ static int _viv_is_msg(MSG *msg)
 */					
 					if(key_flags==0 && msg->wParam=='1'){_viv_command(fyto_toggle_mode_command());return 1;}
                     if(key_flags==0 && msg->wParam=='A'){_viv_command(VIV_ID_VIEW_EXIF);return 1;}
-                    if ((key_flags == 0) && (msg->wParam == VK_ESCAPE)){PostMessage(_viv_hwnd,WM_CLOSE,0,0);return 1;}
-                    // cancel action
+                    // ESC cancels the current action first, then leaves fullscreen (pausing
+                    // the slideshow), and only closes the viewer when nothing is left to cancel.
 					if ((key_flags == 0) && (msg->wParam == VK_ESCAPE))
 					{
 						if (_viv_doing)
 						{
 							_viv_doing_cancel();
-						
+							
 							return 1;
 						}
-
+						
 						if (_viv_is_fullscreen)
 						{
 							_viv_toggle_fullscreen();
@@ -7436,9 +7436,15 @@ static int _viv_is_msg(MSG *msg)
 							{
 								_viv_pause();
 							}
-						
+							
 							return 1;
 						}
+						
+						// Nothing left to cancel: closing is the last resort, so ESC still
+						// works as "close" from normal mode.
+						PostMessage(_viv_hwnd,WM_CLOSE,0,0);
+						
+						return 1;
 					}
 					
 					// find the key.
