@@ -1468,8 +1468,7 @@ static void _viv_update_exif(void)
     exif_layout(_viv_hwnd, 0, _viv_get_status_high() + _viv_get_controls_high());
 }
 
-// Painting a 24 MP frame at fit size means a HALFTONE StretchBlt, which costs
-// about 13 ms of GDI dithering on every paint. Browsing repaints the same image
+// Painting a 24 MP frame at fit size means a HALFTONE StretchBlt, which costs// about 13 ms of GDI dithering on every paint. Browsing repaints the same image
 // at the same size repeatedly - coming back to a seen image, and repainting
 // once the full frame replaces the quarter-scale preview - so keep the scaled
 // result for the most recent images and paint those with a plain BitBlt
@@ -1644,6 +1643,101 @@ static void _viv_render_cache_clear(void)
     }
 }
 
+// Averaging box downscale between two DIBs. GDI's HALFTONE StretchBlt costs
+// about 16 ms for a 1500x1000 -> 1080x720 step, and it runs on the UI thread
+// in the middle of a scroll; averaging the source box is several times faster
+// and does not dither, so the picture the user sees does not change.
+static BOOL _viv_box_scale(HBITMAP source, int src_wide, int src_high,
+    HBITMAP dest, int dst_wide, int dst_high)
+{
+    DIBSECTION s, d;
+    const BYTE *sp;
+    BYTE *dp;
+    int y, sbpp, sstride, dstride, s_high;
+    BOOL s_topdown;
+    int *map_x = NULL, *map_y = NULL;
+    UINT inv_table[65];
+    BOOL ok = FALSE;
+
+    if (!source || !dest || dst_wide < 1 || dst_high < 1 ||
+        src_wide < dst_wide || src_high < dst_high) return FALSE;
+    if (GetObject(source, sizeof(s), &s) != sizeof(s) ||
+        GetObject(dest, sizeof(d), &d) != sizeof(d)) return FALSE;
+    if (!s.dsBm.bmBits || !d.dsBm.bmBits ||
+        s.dsBmih.biCompression != BI_RGB || d.dsBmih.biCompression != BI_RGB) return FALSE;
+    sbpp = s.dsBm.bmBitsPixel;
+    if ((sbpp != 32 && sbpp != 24) || d.dsBm.bmBitsPixel != 32) return FALSE;
+
+    /* Pixel-boundary tables and reciprocals: a division per destination pixel
+       made this slower than the GDI call it replaces. */
+    map_x = (int *)mem_alloc(sizeof(int) * (size_t)(dst_wide + 1));
+    map_y = (int *)mem_alloc(sizeof(int) * (size_t)(dst_high + 1));
+    if (!map_x || !map_y) goto done;
+    {
+        int pos = 0, rem = 0, i;
+        for (i = 0; i <= dst_wide; i++)
+        {
+            map_x[i] = pos;
+            rem += src_wide;
+            pos += rem / dst_wide;
+            rem %= dst_wide;
+        }
+        pos = 0; rem = 0;
+        for (i = 0; i <= dst_high; i++)
+        {
+            map_y[i] = pos;
+            rem += src_high;
+            pos += rem / dst_high;
+            rem %= dst_high;
+        }
+    }
+    for (y = 0; y < 65; y++) inv_table[y] = y ? 65536u / (UINT)y : 0;
+
+    sstride = s.dsBm.bmWidthBytes;
+    dstride = d.dsBm.bmWidthBytes;
+    s_high = s.dsBm.bmHeight;
+    s_topdown = s.dsBmih.biHeight < 0;
+    sp = (const BYTE *)s.dsBm.bmBits;
+    dp = (BYTE *)d.dsBm.bmBits;
+
+    for (y = 0; y < dst_high; y++)
+    {
+        int sy0 = map_y[y];
+        int sy1 = map_y[y + 1];
+        DWORD *drow = (DWORD *)(dp + (SIZE_T)y * dstride);
+        int x;
+        if (sy1 <= sy0) sy1 = sy0 + 1;
+        for (x = 0; x < dst_wide; x++)
+        {
+            int sx0 = map_x[x];
+            int sx1 = map_x[x + 1];
+            UINT r = 0, g = 0, b = 0, n = 0, inv;
+            int sy;
+            if (sx1 <= sx0) sx1 = sx0 + 1;
+            for (sy = sy0; sy < sy1; sy++)
+            {
+                int row = s_topdown ? sy : (s_high - 1 - sy);
+                const BYTE *p = sp + (SIZE_T)row * sstride + (SIZE_T)sx0 * (sbpp >> 3);
+                int count = sx1 - sx0;
+                if (sbpp == 32)
+                    while (count-- > 0) { b += p[0]; g += p[1]; r += p[2]; p += 4; }
+                else
+                    while (count-- > 0) { b += p[0]; g += p[1]; r += p[2]; p += 3; }
+                n += (UINT)(sx1 - sx0);
+            }
+            inv = n < 65 ? inv_table[n] : 65536u / n;
+            drow[x] = ((((r * inv) >> 16) & 0xff) << 16) |
+                      ((((g * inv) >> 16) & 0xff) << 8) |
+                       (((b * inv) >> 16) & 0xff);
+        }
+    }
+    ok = TRUE;
+done:
+    if (map_x) mem_free(map_x);
+    if (map_y) mem_free(map_y);
+    return ok;
+}
+
 // Returns TRUE when the image has been drawn. On a miss the scaled bitmap is
 // rendered once into the cache and then blitted, so the first paint costs the
 // same as before and every later paint of that image is a BitBlt. A cached
@@ -1693,10 +1787,17 @@ static BOOL _viv_render_paint(HDC dst, HDC src, int mip_wide, int mip_high,
                 ok = BitBlt(mem_dc, 0, 0, wide, high, src, 0, 0, SRCCOPY) != 0;
             else if (mip_wide >= wide && mip_high >= high)
             {
-                previous_mode = SetStretchBltMode(mem_dc, HALFTONE);
-                SetBrushOrgEx(mem_dc, 0, 0, NULL);
-                ok = StretchBlt(mem_dc, 0, 0, wide, high, src, 0, 0, mip_wide, mip_high, SRCCOPY) != 0;
-                SetStretchBltMode(mem_dc, previous_mode);
+                /* Averaging is faster than GDI's dithered stretch and keeps the
+                   UI responsive while the user scrolls. */
+                ok = _viv_box_scale((HBITMAP)GetCurrentObject(src, OBJ_BITMAP),
+                    mip_wide, mip_high, slot->hbitmap, wide, high);
+                if (!ok)
+                {
+                    previous_mode = SetStretchBltMode(mem_dc, HALFTONE);
+                    SetBrushOrgEx(mem_dc, 0, 0, NULL);
+                    ok = StretchBlt(mem_dc, 0, 0, wide, high, src, 0, 0, mip_wide, mip_high, SRCCOPY) != 0;
+                    SetStretchBltMode(mem_dc, previous_mode);
+                }
             }
             else
             {
