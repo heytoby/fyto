@@ -2571,7 +2571,8 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 		return;
 	}
 	else
-	if ((!is_preload) && (_viv_load_is_preload) && (*_viv_preload_fd->cFileName) && _viv_same_image(_viv_preload_fd, fd))
+	if ((!is_preload) && (*_viv_preload_fd->cFileName) && _viv_same_image(_viv_preload_fd, fd) &&
+		(_viv_load_is_preload || _viv_preload_preview.hbitmap || _viv_preload_frames))
 	{
 		if (_viv_open_preload()) return;
 	}
