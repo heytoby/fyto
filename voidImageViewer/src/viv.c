@@ -811,6 +811,9 @@ static WIN32_FIND_DATA *_viv_load_image_next_fd = NULL;
 static WIN32_FIND_DATA _viv_requested_fd;
 static int _viv_wheel_navigation;
 static int _viv_wheel_delta;
+// While set, queued navigation steps are accumulated and replayed once, so a
+// fast wheel scroll moves straight to the final image.
+static int _viv_navigation_batching;
 static BYTE _viv_load_image_next_is_preload = 0;
 static volatile int _viv_load_image_terminate = 0;
 static _viv_reply_t *_viv_reply_start = 0;
@@ -14873,14 +14876,35 @@ static void _viv_do_mousewheel_action(int action,int delta,int x,int y)
 	}
     else if (action == 1 || action == 2)
     {
+        MSG queued;
         _viv_wheel_delta += delta;
-        while (_viv_wheel_delta >= WHEEL_DELTA || _viv_wheel_delta <= -WHEEL_DELTA)
+        /* Windows delivers one WM_MOUSEWHEEL per notch, so a quick scroll
+           arrives as a run of messages and the window would decode every
+           image in between. Take the notches that are already queued and move
+           once, to the image the user will actually be looking at. */
+        while (PeekMessageW(&queued, _viv_hwnd, WM_MOUSEWHEEL, WM_MOUSEWHEEL, PM_REMOVE))
+            _viv_wheel_delta += GET_WHEEL_DELTA_WPARAM(queued.wParam);
+        if (_viv_wheel_delta > 0)
         {
-            BOOL up = _viv_wheel_delta > 0;
-            _viv_wheel_delta += up ? -WHEEL_DELTA : WHEEL_DELTA;
+            int notches = _viv_wheel_delta / WHEEL_DELTA;
+            _viv_wheel_delta -= notches * WHEEL_DELTA;
             _viv_wheel_navigation = 1;
-            _viv_next_manual(action == 1 ? up : !up, 0);
+            _viv_navigation_batching = 1;
+            while (notches-- > 0) _viv_next_manual(action == 1 ? 1 : 0, 0);
+            _viv_navigation_batching = 0;
             _viv_wheel_navigation = 0;
+            _viv_replay_directory_navigation(TRUE);
+        }
+        else if (_viv_wheel_delta < 0)
+        {
+            int notches = (-_viv_wheel_delta) / WHEEL_DELTA;
+            _viv_wheel_delta += notches * WHEEL_DELTA;
+            _viv_wheel_navigation = 1;
+            _viv_navigation_batching = 1;
+            while (notches-- > 0) _viv_next_manual(action == 1 ? 0 : 1, 0);
+            _viv_navigation_batching = 0;
+            _viv_wheel_navigation = 0;
+            _viv_replay_directory_navigation(TRUE);
         }
     }
 }
@@ -15355,6 +15379,44 @@ static void _viv_replay_directory_navigation(BOOL fresh)
         BYTE step = _viv_directory_steps[0];
         int prev = (step & FYTO_NAV_PREVIOUS) != 0;
         BOOL playlist = _viv_playlist_start != NULL;
+
+        if (!playlist && _viv_directory_step_count > 1)
+        {
+            /* Rapid presses queue up while an image loads, and only the last
+               one is ever looked at: walk the cached listing to the final
+               image and open that once, instead of decoding every image in
+               between. The steps are consumed in order, so the net offset is
+               kept - ten presses still move ten images - and a reversal in the
+               queue simply walks back. */
+            WIN32_FIND_DATA walk = *_viv_current_fd, hop;
+            BYTE last_step = step;
+            int last_prev = prev;
+            unsigned moved = 0, i;
+            for (i = 0; i < _viv_directory_step_count; i++)
+            {
+                BYTE queued = _viv_directory_steps[i];
+                if (!_viv_cached_directory_next(&walk, (queued & FYTO_NAV_PREVIOUS) != 0,
+                    (queued & FYTO_NAV_WRAP) != 0, &hop, fresh)) break;
+                if (!*hop.cFileName) break; /* end of the list without wrap */
+                walk = hop;
+                last_step = queued;
+                last_prev = (queued & FYTO_NAV_PREVIOUS) != 0;
+                moved = i + 1;
+            }
+            if (moved)
+            {
+                _viv_directory_step_count -= moved;
+                memmove(_viv_directory_steps, _viv_directory_steps + moved, _viv_directory_step_count);
+                _viv_last_is_prev = last_prev;
+                _viv_navigation_in_flight = last_step;
+                _viv_dispatching_navigation = TRUE;
+                _viv_open(&walk, 0);
+                _viv_dispatching_navigation = FALSE;
+                _viv_finish_directory_navigation();
+                return;
+            }
+        }
+
         if (!playlist && !_viv_cached_directory_next(_viv_current_fd, prev,
             (step & FYTO_NAV_WRAP) != 0, &next, fresh))
         {
@@ -15439,7 +15501,7 @@ static void _viv_next_manual(int prev, int repeat)
     /* Navigate from the cached listing right away. Waiting for the change
        notification to be re-validated made almost every step take a rescan
        round trip once the folder had been touched; refresh afterwards. */
-    _viv_replay_directory_navigation(TRUE);
+    if (!_viv_navigation_batching) _viv_replay_directory_navigation(TRUE);
     if (_viv_directory_cache && _viv_directory_changed(_viv_directory_cache))
         _viv_schedule_directory_scan();
     if (_viv_is_slideshow)
