@@ -707,7 +707,7 @@ static DWORD _viv_jpeg_detail_started;
 static struct {
     WIN32_FIND_DATA file;
     _viv_preview_t image;
-} _viv_recent_previews[2];
+} _viv_recent_previews[8];
 static unsigned _viv_recent_preview_slot;
 typedef struct _viv_directory_s
 {
@@ -1460,6 +1460,234 @@ static void _viv_update_exif(void)
     exif_layout(_viv_hwnd, 0, _viv_get_status_high() + _viv_get_controls_high());
 }
 
+// Painting a 24 MP frame at fit size means a HALFTONE StretchBlt, which costs
+// about 13 ms of GDI dithering on every paint. Browsing repaints the same image
+// at the same size repeatedly - coming back to a seen image, and repainting
+// once the full frame replaces the quarter-scale preview - so keep the scaled
+// result for the most recent images and paint those with a plain BitBlt
+// (about 0.3 ms). The dither pattern is anchored to the image origin, exactly
+// like the direct StretchBlt path, so the pixels are identical.
+#define FYTO_RENDER_SLOTS 16
+#define FYTO_RENDER_MAX_PIXELS (4u * 1024u * 1024u)
+
+typedef struct _viv_render_slot_s
+{
+    wchar_t name[STRING_SIZE];
+    int frame;
+    int wide, high;
+    int image_wide, image_high;
+    int source_wide;
+    HBITMAP hbitmap;
+    DWORD used;
+} _viv_render_slot_t;
+
+static _viv_render_slot_t _viv_render_slots[FYTO_RENDER_SLOTS];
+static DWORD _viv_render_stamp;
+
+static HBITMAP _viv_copy_bitmap(HBITMAP source, int wide, int high)
+{
+    HDC screen, src, dst;
+    HBITMAP copy;
+    HGDIOBJ previous_src, previous_dst;
+    if (!source || wide < 1 || high < 1) return NULL;
+    screen = GetDC(NULL);
+    if (!screen) return NULL;
+    src = CreateCompatibleDC(screen);
+    dst = CreateCompatibleDC(screen);
+    copy = fyto_image_dib(wide, high, 32, NULL);
+    if (src && dst && copy)
+    {
+        previous_src = SelectObject(src, source);
+        previous_dst = SelectObject(dst, copy);
+        if (!previous_src || !previous_dst ||
+            !BitBlt(dst, 0, 0, wide, high, src, 0, 0, SRCCOPY))
+        {
+            DeleteObject(copy);
+            copy = NULL;
+        }
+        if (previous_src) SelectObject(src, previous_src);
+        if (previous_dst) SelectObject(dst, previous_dst);
+    }
+    else if (copy)
+    {
+        DeleteObject(copy);
+        copy = NULL;
+    }
+    if (src) DeleteDC(src);
+    if (dst) DeleteDC(dst);
+    ReleaseDC(NULL, screen);
+    return copy;
+}
+
+static _viv_render_slot_t *_viv_render_find(const wchar_t *name, int frame, int wide, int high)
+{
+    int i;
+    for (i = 0; i < FYTO_RENDER_SLOTS; i++)
+    {
+        _viv_render_slot_t *slot = &_viv_render_slots[i];
+        if (slot->hbitmap && slot->frame == frame && slot->wide == wide &&
+            slot->high == high && wcscmp(slot->name, name) == 0)
+        {
+            slot->used = ++_viv_render_stamp;
+            return slot;
+        }
+    }
+    return NULL;
+}
+
+static _viv_render_slot_t *_viv_render_reserve(const wchar_t *name, int frame, int wide, int high)
+{
+    int i, free_slot = -1;
+    _viv_render_slot_t *victim = NULL;
+    DWORD oldest = 0xffffffffu;
+    for (i = 0; i < FYTO_RENDER_SLOTS; i++)
+    {
+        _viv_render_slot_t *slot = &_viv_render_slots[i];
+        if (!slot->hbitmap)
+        {
+            if (free_slot < 0) free_slot = i;
+        }
+        else if (slot->used < oldest)
+        {
+            oldest = slot->used;
+            victim = slot;
+        }
+    }
+    if (free_slot < 0)
+    {
+        if (!victim) return NULL;
+        DeleteObject(victim->hbitmap);
+        victim->hbitmap = NULL;
+        free_slot = (int)(victim - _viv_render_slots);
+    }
+    victim = &_viv_render_slots[free_slot];
+    string_copy(victim->name, name);
+    victim->frame = frame;
+    victim->wide = wide;
+    victim->high = high;
+    victim->image_wide = _viv_image_wide;
+    victim->image_high = _viv_image_high;
+    victim->source_wide = 0;
+    victim->used = ++_viv_render_stamp;
+    return victim;
+}
+
+// Hand out a copy of a displayed image so returning to one of the last images
+// paints at once instead of reading and decoding the file again.
+static BOOL _viv_render_restore(const wchar_t *path, _viv_preview_t *preview)
+{
+    int i;
+    for (i = 0; i < FYTO_RENDER_SLOTS; i++)
+    {
+        _viv_render_slot_t *slot = &_viv_render_slots[i];
+        HBITMAP copy;
+        if (!slot->hbitmap || wcscmp(slot->name, path) != 0) continue;
+        copy = _viv_copy_bitmap(slot->hbitmap, slot->wide, slot->high);
+        if (!copy) return FALSE;
+        preview->hbitmap = copy;
+        preview->wide = slot->wide;
+        preview->high = slot->high;
+        preview->image_wide = slot->image_wide;
+        preview->image_high = slot->image_high;
+        preview->defer_detail = FALSE;
+        slot->used = ++_viv_render_stamp;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void _viv_render_cache_clear(void)
+{
+    int i;
+    for (i = 0; i < FYTO_RENDER_SLOTS; i++)
+    {
+        if (_viv_render_slots[i].hbitmap)
+        {
+            DeleteObject(_viv_render_slots[i].hbitmap);
+            _viv_render_slots[i].hbitmap = NULL;
+        }
+    }
+}
+
+// Returns TRUE when the image has been drawn. On a miss the scaled bitmap is
+// rendered once into the cache and then blitted, so the first paint costs the
+// same as before and every later paint of that image is a BitBlt. A cached
+// bitmap built from a smaller source is replaced as soon as a bigger source
+// (the full frame) is available.
+static BOOL _viv_render_paint(HDC dst, HDC src, int mip_wide, int mip_high,
+    int x, int y, int wide, int high, BOOL allow_build)
+{
+    _viv_render_slot_t *slot;
+    const wchar_t *name = _viv_presented_path();
+    HDC mem_dc;
+    HGDIOBJ previous;
+    BOOL painted = FALSE;
+
+    if (!*name || wide < 8 || high < 8) return FALSE;
+    if ((UINT64)wide * high > FYTO_RENDER_MAX_PIXELS) return FALSE;
+
+    slot = _viv_render_find(name, _viv_frame_position, wide, high);
+    if (slot && mip_wide > slot->source_wide && mip_wide >= wide)
+    {
+        DeleteObject(slot->hbitmap);
+        slot->hbitmap = NULL;
+        slot = NULL;
+    }
+    if (!slot)
+    {
+        int previous_mode;
+        if (!allow_build) return FALSE;
+        slot = _viv_render_reserve(name, _viv_frame_position, wide, high);
+        if (!slot) return FALSE;
+        slot->hbitmap = fyto_image_dib(wide, high, 32, NULL);
+        if (!slot->hbitmap) return FALSE;
+        mem_dc = CreateCompatibleDC(dst);
+        if (!mem_dc) return FALSE;
+        previous = SelectObject(mem_dc, slot->hbitmap);
+        if (previous)
+        {
+            BOOL ok;
+            slot->source_wide = mip_wide;
+            if (mip_wide == wide && mip_high == high)
+                ok = BitBlt(mem_dc, 0, 0, wide, high, src, 0, 0, SRCCOPY) != 0;
+            else if (mip_wide >= wide && mip_high >= high)
+            {
+                previous_mode = SetStretchBltMode(mem_dc, HALFTONE);
+                SetBrushOrgEx(mem_dc, 0, 0, NULL);
+                ok = StretchBlt(mem_dc, 0, 0, wide, high, src, 0, 0, mip_wide, mip_high, SRCCOPY) != 0;
+                SetStretchBltMode(mem_dc, previous_mode);
+            }
+            else
+            {
+                previous_mode = SetStretchBltMode(mem_dc, COLORONCOLOR);
+                ok = StretchBlt(mem_dc, 0, 0, wide, high, src, 0, 0, mip_wide, mip_high, SRCCOPY) != 0;
+                SetStretchBltMode(mem_dc, previous_mode);
+            }
+            SelectObject(mem_dc, previous);
+            if (!ok)
+            {
+                DeleteDC(mem_dc);
+                DeleteObject(slot->hbitmap);
+                slot->hbitmap = NULL;
+                return FALSE;
+            }
+        }
+        DeleteDC(mem_dc);
+        if (!slot->hbitmap) return FALSE;
+    }
+
+    mem_dc = CreateCompatibleDC(dst);
+    if (!mem_dc) return FALSE;
+    previous = SelectObject(mem_dc, slot->hbitmap);
+    if (previous)
+    {
+        painted = BitBlt(dst, x, y, wide, high, mem_dc, 0, 0, SRCCOPY) != 0;
+        SelectObject(mem_dc, previous);
+    }
+    DeleteDC(mem_dc);
+    return painted;
+}
+
 static void _viv_mipmap_free(_viv_mipmap_t *mipmap)
 {
 	DeleteObject(mipmap->hbitmap);
@@ -1769,8 +1997,13 @@ static void _viv_take_recent_preview(const WIN32_FIND_DATA *file, _viv_preview_t
     {
         if (_viv_recent_previews[i].image.hbitmap && _viv_same_image(&_viv_recent_previews[i].file, file))
         {
-            *preview = _viv_recent_previews[i].image;
-            _viv_recent_previews[i].image.hbitmap = NULL;
+            _viv_preview_t *slot = &_viv_recent_previews[i].image;
+            /* Hand out a copy and keep the cached one: stepping back and forth
+               over the last images must not turn into a reload. */
+            HBITMAP copy = _viv_copy_bitmap(slot->hbitmap, slot->wide, slot->high);
+            if (!copy) return;
+            *preview = *slot;
+            preview->hbitmap = copy;
             return;
         }
     }
@@ -1892,6 +2125,12 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
         }
         else if (!_viv_is_slideshow && config_cache_last)
             _viv_take_recent_preview(fd, &cached);
+
+        /* Nothing cached by the frame caches: fall back to the display-size
+           bitmap painted for this file, so a return is instant instead of
+           another read plus decode. The load below still upgrades it. */
+        if (!cached.hbitmap && !_viv_is_slideshow && config_cache_last)
+            _viv_render_restore(fd->cFileName, &cached);
 
         // Keep the neighbor ready while the displayed JPEG gains its full-resolution frame.
         preserve_preload = !_viv_active_load && _viv_preview.hbitmap &&
@@ -3325,6 +3564,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 		case WM_DESTROY:
 			// don't free the menu again.
 			_viv_hmenu = 0;
+			_viv_render_cache_clear();
 			break;
 			
 		case WM_QUERYENDSESSION:
@@ -4949,12 +5189,15 @@ debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
 								{
 									if ((rw == mip_wide) && (rh == mip_high))
 									{
+										if (!_viv_render_paint(ps.hdc, mem_hdc, mip_wide, mip_high, rx, ry, rw, rh, TRUE))
+										{
 										if (BitBlt(ps.hdc,rx,ry,rw,rh,mem_hdc,0,0,SRCCOPY))
 										{
 										}
 										else
 										{
 											debug_printf("BitBlt failed %d\n",GetLastError());
+										}
 										}
 									}
 									else
@@ -5043,12 +5286,15 @@ debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
 															{
 																if (SelectClipRgn(ps.hdc,clip_hrgn) != ERROR)
 																{
+																	if (!_viv_render_paint(ps.hdc, mem_hdc, mip_wide, mip_high, rx, ry, rw, rh, rect_run == 1))
+																	{
 																	if (StretchBlt(ps.hdc,rx,ry,rw,rh,mem_hdc,0,0,mip_wide,mip_high,SRCCOPY))
 																	{
 																	}
 																	else
 																	{
 																		debug_printf("StretchBlt failed %d\n",GetLastError());
+																	}
 																	}
 																}
 																
@@ -15190,7 +15436,12 @@ static void _viv_next_manual(int prev, int repeat)
     if (_viv_directory_step_count == ARRAYSIZE(_viv_directory_steps)) return;
     _viv_directory_steps[_viv_directory_step_count++] =
         (prev ? FYTO_NAV_PREVIOUS : 0) | (_viv_wheel_navigation ? FYTO_NAV_WHEEL : FYTO_NAV_WRAP);
-    _viv_replay_directory_navigation(FALSE);
+    /* Navigate from the cached listing right away. Waiting for the change
+       notification to be re-validated made almost every step take a rescan
+       round trip once the folder had been touched; refresh afterwards. */
+    _viv_replay_directory_navigation(TRUE);
+    if (_viv_directory_cache && _viv_directory_changed(_viv_directory_cache))
+        _viv_schedule_directory_scan();
     if (_viv_is_slideshow)
     {
         KillTimer(_viv_hwnd, VIV_ID_SLIDESHOW_TIMER);
@@ -15484,21 +15735,31 @@ static void _viv_keep_current_preview(void)
 {
     UINT wide = _viv_image_wide, high = _viv_image_high;
     _viv_mipmap_t *mip;
+    _viv_mipmap_t *take = NULL;
+    HBITMAP hbitmap;
     if (!config_cache_last || _viv_frame_count != 1 || _viv_frame_loaded_count != 1 ||
         !*_viv_frame_fd->cFileName || !_viv_frames) return;
 
+    /* Keep the frame itself when it already fits the budget. The old loop
+       halved unconditionally, so a quarter-scale frame was remembered as a
+       750x500 bitmap and every return to that image painted a blurry,
+       magnified copy. */
+    hbitmap = _viv_frames[0].hbitmap;
     mip = _viv_frames[0].mipmap;
-    while (mip)
+    while ((UINT64)wide * high > FYTO_NEIGHBOR_PIXELS)
     {
+        if (!mip || !mip->hbitmap) return;
         wide = wide / 2 + (wide & 1);
         high = high / 2 + (high & 1);
-        if ((UINT64)wide * high <= FYTO_NEIGHBOR_PIXELS) break;
+        hbitmap = mip->hbitmap;
+        take = mip;
         mip = mip->mipmap;
     }
-    if (!mip || !mip->hbitmap) return;
+    if (!hbitmap) return;
 
-    _viv_remember_preview((_viv_preview_t){mip->hbitmap, wide, high, _viv_image_wide, _viv_image_high, FALSE});
-    mip->hbitmap = NULL;
+    _viv_remember_preview((_viv_preview_t){hbitmap, wide, high, _viv_image_wide, _viv_image_high, FALSE});
+    if (take) take->hbitmap = NULL;
+    else _viv_frames[0].hbitmap = NULL;
 }
 
 // copy the current image to the last image.
@@ -15506,7 +15767,10 @@ static void viv_copy_current_image_to_last_image(void)
 {
     if (_viv_preview.hbitmap)
     {
-        if (config_cache_last && _viv_preview.defer_detail && *_viv_frame_fd->cFileName)
+        /* Remember what was on screen even when it is not the final image:
+           coming back to one of the last few images should not need another
+           file read and decode. */
+        if (config_cache_last && *_viv_frame_fd->cFileName)
         {
             _viv_remember_preview(_viv_preview);
             _viv_preview.hbitmap = NULL;
