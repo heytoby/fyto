@@ -82,6 +82,10 @@ static int exif_font_dpi;
 static int exif_top,exif_bottom;
 static HBRUSH exif_brush;
 static COLORREF exif_bg=RGB(32,35,39);
+// Colour last applied to the rich-edit document. Reformatting the whole
+// document on every image sync is expensive, so it is only done when the
+// colour the document is showing is stale.
+static COLORREF exif_rich_theme=CLR_INVALID;
 static HWND exif_overview_button,exif_detail_button;
 static const wchar_t *tr(const wchar_t *en,const wchar_t *zh){return config_language?zh:en;}
 static void fmt(wchar_t *out,size_t cap,const wchar_t *format,...){va_list args;va_start(args,format);_vsnwprintf_s(out,cap,_TRUNCATE,format,args);va_end(args);}
@@ -216,7 +220,7 @@ static LRESULT CALLBACK exif_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){switch
  case WM_DRAWITEM:{DRAWITEMSTRUCT *d=(DRAWITEMSTRUCT *)lp;wchar_t label[80];GetWindowTextW(d->hwndItem,label,80);ui_fill(d->hDC,&d->rcItem,exif_bg);ui_button(d->hDC,d->rcItem,exif_bg,label,(d->CtlID==2011 && !exif_details)||(d->CtlID==2012 && exif_details),(d->itemState&ODS_SELECTED)!=0,1,exif_font,0);return TRUE;}
  case WM_NOTIFY:if(((NMHDR *)lp)->hwndFrom==exif_tabs && ((NMHDR *)lp)->code==TCN_SELCHANGE){exif_details=TabCtrl_GetCurSel(exif_tabs);show_exif_page();return 0;}if(((NMHDR *)lp)->code==LVN_KEYDOWN){NMLVKEYDOWN *key=(NMLVKEYDOWN *)lp;if(key->wVKey=='C' && GetKeyState(VK_CONTROL)<0)copy_all();else if(key->wVKey==VK_ESCAPE)SendMessageW(hwnd,WM_CLOSE,0,0);}break;
  case WM_CLOSE:SendMessageW(GetParent(hwnd),WM_COMMAND,VIV_ID_VIEW_EXIF,0);return 0;
- case WM_DESTROY:if(exif_font)DeleteObject(exif_font);if(exif_heading_font)DeleteObject(exif_heading_font);exif_font=exif_heading_font=NULL;exif_heading=exif_close=NULL;exif_summary=exif_tabs=NULL;exif_hwnd=exif_list=exif_file=exif_count=exif_copy=NULL;return 0;
+ case WM_DESTROY:if(exif_font)DeleteObject(exif_font);if(exif_heading_font)DeleteObject(exif_heading_font);exif_font=exif_heading_font=NULL;exif_heading=exif_close=NULL;exif_summary=exif_tabs=NULL;exif_hwnd=exif_list=exif_file=exif_count=exif_copy=NULL;exif_rich_theme=CLR_INVALID;return 0;
  }return DefWindowProcW(hwnd,msg,wp,lp);}
 int exif_sidebar_width(HWND owner)
 {
@@ -225,7 +229,7 @@ int exif_sidebar_width(HWND owner)
     GetClientRect(owner,&r);
     return min(exif_scale(340),(r.right-r.left)/2);
 }
-void exif_set_background(COLORREF color){int changed=color!=exif_bg;exif_bg=color;if(!exif_hwnd)return;if(!exif_brush || changed){HBRUSH old=exif_brush;exif_brush=CreateSolidBrush(color);if(old)DeleteObject(old);}if(exif_list){ListView_SetBkColor(exif_list,color);ListView_SetTextBkColor(exif_list,color);ListView_SetTextColor(exif_list,ui_text(color));}if(exif_summary && exif_richedit){CHARRANGE range;CHARFORMAT2W cf;int line=(int)SendMessageW(exif_summary,EM_GETFIRSTVISIBLELINE,0,0);SendMessageW(exif_summary,EM_EXGETSEL,0,(LPARAM)&range);ShowScrollBar(exif_summary,SB_VERT,FALSE);SendMessageW(exif_summary,EM_SETBKGNDCOLOR,0,color);ZeroMemory(&cf,sizeof(cf));cf.cbSize=sizeof(cf);cf.dwMask=CFM_COLOR;cf.crTextColor=ui_text(color);SendMessageW(exif_summary,EM_SETSEL,0,-1);SendMessageW(exif_summary,EM_SETCHARFORMAT,SCF_SELECTION,(LPARAM)&cf);SendMessageW(exif_summary,EM_EXSETSEL,0,(LPARAM)&range);SendMessageW(exif_summary,EM_LINESCROLL,0,line-(int)SendMessageW(exif_summary,EM_GETFIRSTVISIBLELINE,0,0));}if(changed)RedrawWindow(exif_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);}
+void exif_set_background(COLORREF color){int changed=color!=exif_bg;exif_bg=color;if(!exif_hwnd)return;if(!exif_brush || changed){HBRUSH old=exif_brush;exif_brush=CreateSolidBrush(color);if(old)DeleteObject(old);}if(exif_list){ListView_SetBkColor(exif_list,color);ListView_SetTextBkColor(exif_list,color);ListView_SetTextColor(exif_list,ui_text(color));}if(exif_summary && exif_richedit && exif_rich_theme!=color){CHARRANGE range;CHARFORMAT2W cf;int line=(int)SendMessageW(exif_summary,EM_GETFIRSTVISIBLELINE,0,0);SendMessageW(exif_summary,EM_EXGETSEL,0,(LPARAM)&range);SendMessageW(exif_summary,EM_SETBKGNDCOLOR,0,color);ZeroMemory(&cf,sizeof(cf));cf.cbSize=sizeof(cf);cf.dwMask=CFM_COLOR;cf.crTextColor=ui_text(color);SendMessageW(exif_summary,EM_SETSEL,0,-1);SendMessageW(exif_summary,EM_SETCHARFORMAT,SCF_SELECTION,(LPARAM)&cf);SendMessageW(exif_summary,EM_EXSETSEL,0,(LPARAM)&range);SendMessageW(exif_summary,EM_LINESCROLL,0,line-(int)SendMessageW(exif_summary,EM_GETFIRSTVISIBLELINE,0,0));exif_rich_theme=color;}if(changed)RedrawWindow(exif_hwnd,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);}
 void exif_layout(HWND owner,int top,int bottom)
 {
     RECT r;
