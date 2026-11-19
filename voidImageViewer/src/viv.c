@@ -9469,13 +9469,12 @@ static INT_PTR CALLBACK _viv_options_view_proc(HWND hwnd,UINT msg,WPARAM wParam,
 					if (HIWORD(wParam) == CBN_SELCHANGE)
 					{
 						config_theme = (BYTE)(ComboBox_GetCurSel(GetDlgItem(hwnd,IDC_THEME)) == 1);
+						/* _viv_apply_theme() already redraws the frame, the client
+						   and every child synchronously; repeating the title paint
+						   and the invalidations here redrew the whole window a
+						   second time. */
 						_viv_apply_theme();
 						exif_set_background(_viv_exif_background());
-						if (_viv_hwnd) title_paint(_viv_hwnd);
-						if (_viv_rebar_hwnd) InvalidateRect(_viv_rebar_hwnd,NULL,TRUE);
-						if (_viv_toolbar_hwnd) InvalidateRect(_viv_toolbar_hwnd,NULL,TRUE);
-						if (_viv_status_hwnd) InvalidateRect(_viv_status_hwnd,NULL,TRUE);
-						if (_viv_hwnd) InvalidateRect(_viv_hwnd,0,FALSE);
 					}
 					break;
 			}
