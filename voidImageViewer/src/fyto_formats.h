@@ -248,15 +248,36 @@ static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp
     if(msg==WM_CLOSE){fyto_write_association_value(L"SetupVersion",1);EndDialog(hwnd,0);return TRUE;}
     return FALSE;
 }
+// Hand-built dialog template: the byte count has to match the real layout
+// exactly. The old version declared a 44-byte struct but copied a 38-byte font
+// name into an 18-byte field, so the string ran 20 bytes past the end of the
+// template and the dialog manager then read its NUL from beyond the struct.
+#define FYTO_FORMATS_FONT L"Microsoft YaHei UI"
+#pragma pack(push,1)
+typedef struct _fyto_formats_dlg_template_s
+{
+    DLGTEMPLATE dlg;        /* 18 bytes, no padding */
+    WORD menu,cls,title;    /* no menu, dialog class, no title text */
+    WORD point;             /* DS_SETFONT size */
+    wchar_t font[ARRAYSIZE(FYTO_FORMATS_FONT)]; /* typeface, NUL terminated */
+} fyto_formats_dlg_template_t;
+#pragma pack(pop)
+// Compile-time proof that the font field holds the whole name.
+typedef char _fyto_formats_font_fits[
+    (ARRAYSIZE(FYTO_FORMATS_FONT) > 1 &&
+     sizeof(((fyto_formats_dlg_template_t *)0)->font) == sizeof(FYTO_FORMATS_FONT)) ? 1 : -1];
+
 static void fyto_format_dialog(HWND owner)
 {
-#pragma pack(push,2)
-    struct {DLGTEMPLATE dlg;WORD menu,cls,title,point;wchar_t font[9];} data;
-#pragma pack(pop)
+    // A union with a pointer keeps the template word-aligned on the stack.
+    union { void *align; fyto_formats_dlg_template_t t; } tpl;
     if(fyto_formats_window && IsWindow(fyto_formats_window)){SetForegroundWindow(fyto_formats_window);return;}
-    ZeroMemory(&data,sizeof(data));data.dlg.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME|DS_CENTER|DS_SETFONT;data.dlg.cx=376;data.dlg.cy=200;
-    data.point=9;lstrcpyW(data.font,L"Microsoft YaHei UI");
-    DialogBoxIndirectParamW(GetModuleHandleW(NULL),&data.dlg,owner,fyto_formats_proc,0);
+    ZeroMemory(&tpl,sizeof(tpl));
+    tpl.t.dlg.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME|DS_CENTER|DS_SETFONT;
+    tpl.t.dlg.cx=376;tpl.t.dlg.cy=200;
+    tpl.t.point=9;
+    lstrcpyW(tpl.t.font,FYTO_FORMATS_FONT);
+    DialogBoxIndirectParamW(GetModuleHandleW(NULL),&tpl.t.dlg,owner,fyto_formats_proc,0);
     fyto_formats_window=NULL;
     InvalidateRect(owner,NULL,FALSE);
 }
