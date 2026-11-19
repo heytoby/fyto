@@ -331,6 +331,20 @@ typedef struct _viv_fd_s
 	
 }_viv_fd_t;
 */
+// Geometry used to decide how big the window will paint an image. Captured on
+// the UI thread when a prefetch starts, then used by the decode thread, so the
+// two agree on the target size.
+typedef struct _viv_display_env_s
+{
+    BOOL auto_fit;              // the window will be refitted for this image
+    int area_wide, area_high;   // monitor work area (auto_fit) or viewport
+    int edge;                   // requested long edge (auto_fit)
+    int chrome_high;
+    BOOL show_exif;
+    int sidebar_limit;
+    BOOL fill_window, keep_aspect, allow_shrink;
+} _viv_display_env_t;
+
 typedef struct _viv_load_job_s
 {
     HANDLE thread;
@@ -338,11 +352,12 @@ typedef struct _viv_load_job_s
     int render_wide, render_high;
     BOOL use_icm, use_orientation;
     BOOL prefetch, have_preview, preview_only, defer_jpeg_detail;
-    /* Display-size prefetch: render the bitmap at exactly the window fit size
-       instead of decoding a full-resolution frame. The fit settings are copied
-       from the window when the job is created, so the decode thread never
-       reads UI state. */
-    BOOL display_prefetch, fit_fill_window, fit_keep_aspect, fit_allow_shrink;
+    /* Display-size prefetch: render the bitmap at exactly the size the window
+       will paint, instead of decoding a full-resolution frame. The geometry is
+       copied from the window when the job is created, so the decode thread
+       never reads UI state. */
+    BOOL display_prefetch;
+    _viv_display_env_t fit_env;
     UINT64 prefetch_pixels;
     volatile LONG stop, promoted;
 } _viv_load_job_t;
@@ -1402,29 +1417,6 @@ static void _viv_display_fit_box(int area_wide, int area_high, int image_wide, i
 
 // EXIF reserves a side panel; the original viewer chrome and coordinates are retained.
 static void _viv_viewport_rect(RECT *r){GetClientRect(_viv_hwnd,r);r->right-=exif_sidebar_width(_viv_hwnd);r->bottom-=_viv_get_status_high()+_viv_get_controls_high();if(r->bottom<0)r->bottom=0;}
-// TRUE when a preview bitmap is exactly the size the window paints an image of
-// preview->image_wide x preview->image_high at. Such a preview is the finished
-// picture for the current view: do not scale it and do not replace it with a
-// full frame. A prefetch built for another window size is rejected here.
-// UI thread only.
-static BOOL _viv_preview_matches_fit(const _viv_preview_t *preview)
-{
-    RECT rect;
-    int rw, rh, fill_window;
-
-    if (!preview || !preview->hbitmap || !preview->image_wide || !preview->image_high) return FALSE;
-    if (_viv_1to1 || _viv_doing == _VIV_DOING_1TO1SCROLL || _viv_zoom_pos || _viv_explicit_fit) return FALSE;
-    _viv_viewport_rect(&rect);
-    if (rect.right - rect.left < 8 || rect.bottom - rect.top < 8) return FALSE;
-    fill_window = _viv_is_fullscreen ? config_fullscreen_fill_window : config_fill_window;
-    _viv_display_fit_box(rect.right - rect.left, rect.bottom - rect.top,
-        (int)preview->image_wide, (int)preview->image_high, fill_window,
-        config_keep_aspect_ratio, config_allow_shrinking, &rw, &rh);
-    if (rw > (int)preview->image_wide) rw = (int)preview->image_wide;
-    if (rh > (int)preview->image_high) rh = (int)preview->image_high;
-    return rw > 0 && rh > 0 && rw == (int)preview->wide && rh == (int)preview->high;
-}
-
 // fyto's own theme is light/dark for the canvas, but its dialogs are always the
 // native light ones. Windows would otherwise hand them the system dark frame
 // (and some builds render the whole dialog dark), so opt the process into light
@@ -1579,6 +1571,103 @@ static const wchar_t *_viv_presented_path(void)
 }
 #include "titlebar.h"
 #include "viewer_geometry.h"
+// Mirrors the guards around _viv_fit_image_window() at the end of
+// _viv_start_first_frame(): will the window be refitted to the image when it is
+// shown? If not, the current viewport is the right basis.
+static BOOL _viv_window_fits_image(void)
+{
+    if (!_viv_hwnd || fyto_formats_window) return FALSE;
+    if (_viv_is_fullscreen || IsZoomed(_viv_hwnd) || IsIconic(_viv_hwnd)) return FALSE;
+    if (_viv_in_sizemove || _viv_changing_frame) return FALSE;
+    if (_viv_window_arranged(_viv_hwnd)) return FALSE;
+    if (_viv_zoom_pos || _viv_1to1 || _viv_doing == _VIV_DOING_1TO1SCROLL) return FALSE;
+    return TRUE;
+}
+
+// Capture the geometry the window will use for the image being prefetched.
+// UI thread only.
+static void _viv_get_display_env(_viv_display_env_t *env)
+{
+    MONITORINFO mi;
+    HMONITOR monitor;
+    ZeroMemory(env, sizeof(*env));
+    env->auto_fit = _viv_window_fits_image();
+    env->chrome_high = title_height() + _viv_get_status_high();
+    env->show_exif = config_show_exif != 0;
+    env->sidebar_limit = MulDiv(340, os_logical_high, 96);
+    env->fill_window = _viv_is_fullscreen ? config_fullscreen_fill_window : config_fill_window;
+    env->keep_aspect = config_keep_aspect_ratio != 0;
+    env->allow_shrink = config_allow_shrinking != 0;
+    if (env->auto_fit)
+    {
+        monitor = MonitorFromWindow(_viv_hwnd, MONITOR_DEFAULTTONEAREST);
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfo(monitor, &mi))
+        {
+            env->area_wide = mi.rcWork.right - mi.rcWork.left;
+            env->area_high = mi.rcWork.bottom - mi.rcWork.top;
+        }
+        env->edge = _viv_user_sized_window ? _viv_manual_long_edge : FYTO_DEFAULT_LONG_EDGE;
+        if (!env->edge) env->edge = FYTO_DEFAULT_LONG_EDGE;
+        if (env->area_wide < 8 || env->area_high < 8) env->auto_fit = FALSE;
+    }
+    if (!env->auto_fit)
+    {
+        RECT rect;
+        _viv_viewport_rect(&rect);
+        env->area_wide = rect.right - rect.left;
+        env->area_high = rect.bottom - rect.top;
+        env->edge = 0;
+    }
+}
+
+// The size the window will paint an image of this size at, in this geometry.
+// Pure: also used by the decode thread. Does not clamp to the image size.
+static BOOL _viv_display_target_in_env(const _viv_display_env_t *env, int image_wide, int image_high,
+    int *pw, int *ph)
+{
+    if (!env || image_wide < 1 || image_high < 1) return FALSE;
+    if (env->area_wide < 8 || env->area_high < 8) return FALSE;
+    if (env->auto_fit)
+    {
+        fyto_image_fit_t fit;
+        if (!fyto_long_edge_fit(env->area_wide, env->area_high, image_wide, image_high,
+            env->chrome_high, env->show_exif, env->sidebar_limit, env->edge, &fit)) return FALSE;
+        *pw = fit.image_width;
+        *ph = fit.image_height;
+        if (!env->fill_window)
+        {
+            if (*pw > image_wide) *pw = image_wide;
+            if (*ph > image_high) *ph = image_high;
+        }
+    }
+    else
+    {
+        _viv_display_fit_box(env->area_wide, env->area_high, image_wide, image_high,
+            env->fill_window, env->keep_aspect, env->allow_shrink, pw, ph);
+    }
+    return *pw > 0 && *ph > 0;
+}
+
+// TRUE when a preview bitmap is exactly the size the window paints an image of
+// preview->image_wide x preview->image_high at. Such a preview is the finished
+// picture for the current view: do not scale it and do not replace it with a
+// full frame. A prefetch built for another window geometry is rejected here.
+// UI thread only.
+static BOOL _viv_preview_matches_fit(const _viv_preview_t *preview)
+{
+    _viv_display_env_t env;
+    int w, h;
+
+    if (!preview || !preview->hbitmap || !preview->image_wide || !preview->image_high) return FALSE;
+    if (_viv_1to1 || _viv_doing == _VIV_DOING_1TO1SCROLL || _viv_zoom_pos || _viv_explicit_fit) return FALSE;
+    _viv_get_display_env(&env);
+    if (!_viv_display_target_in_env(&env, (int)preview->image_wide, (int)preview->image_high, &w, &h))
+        return FALSE;
+    return w == (int)preview->wide && h == (int)preview->high;
+}
+
+
 #include "window_behavior.h"
 #include "primary_display.h"
 #include "hover_presentation.h"
@@ -2593,9 +2682,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
             !_viv_zoom_pos && !_viv_1to1 && !_viv_explicit_fit &&
             _viv_dst_zoom_x_pos == _VIV_DST_ZOOM_ONE &&
             _viv_dst_zoom_y_pos == _VIV_DST_ZOOM_ONE;
-        job->fit_fill_window = _viv_is_fullscreen ? config_fullscreen_fill_window : config_fill_window;
-        job->fit_keep_aspect = config_keep_aspect_ratio;
-        job->fit_allow_shrink = config_allow_shrinking;
+        if (job->display_prefetch) _viv_get_display_env(&job->fit_env);
         job->have_preview = cached.hbitmap ||
             (!is_preload && _viv_preview.hbitmap && _viv_same_image(_viv_frame_fd, fd));
         _viv_active_load = job;
@@ -11726,9 +11813,9 @@ static BOOL _viv_job_display_target(const _viv_load_job_t *job, int image_wide, 
 {
     int wide, high;
     if (!job->display_prefetch || image_wide < 1 || image_high < 1) return FALSE;
-    _viv_display_fit_box(job->render_wide, job->render_high, image_wide, image_high,
-        job->fit_fill_window, job->fit_keep_aspect, job->fit_allow_shrink, &wide, &high);
-    if (!wide || !high) return FALSE;
+    if (!_viv_display_target_in_env(&job->fit_env, image_wide, image_high, &wide, &high)) return FALSE;
+    /* A prefetch never upscales: when the window is bigger than the image the
+       ordinary full frame is used instead. */
     if (wide > image_wide) wide = image_wide;
     if (high > image_high) high = image_high;
     *target_wide = wide;
