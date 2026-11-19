@@ -620,6 +620,11 @@ static void _viv_clear(void);
 static void _viv_process_pending_clear(void);
 static void _viv_clear_loading_preload(void);
 static void _viv_clear_preload(void);
+// cache budget (defined next to the render slots, used by the paint path above)
+static UINT64 _viv_frame_chain_bytes(UINT wide, UINT high, UINT frames);
+static UINT64 _viv_cache_footprint(void);
+static BOOL _viv_cache_evict_one(BOOL allow_frames);
+static BOOL _viv_cache_reserve(UINT64 need);
 static void _viv_clear_preload_frames(void);
 static HBITMAP _viv_get_mipmap(HBITMAP hbitmap,int image_wide,int image_high,int render_wide,int render_high,int *pmip_wide,int *pmip_high,_viv_mipmap_t **out_mip, BOOL top_down);
 static void _viv_preload_next(void);
@@ -1671,6 +1676,10 @@ static BOOL _viv_render_paint(HDC dst, HDC src, int mip_wide, int mip_high,
         if (!allow_build) return FALSE;
         slot = _viv_render_reserve(name, file, _viv_frame_position, wide, high);
         if (!slot) return FALSE;
+        /* Render slots are charged to the same global budget as the frame
+           caches: when it is full, painting directly is cheaper than evicting
+           an image the user is about to look at. */
+        if (!_viv_cache_reserve((UINT64)wide * high * 4)) return FALSE;
         slot->hbitmap = fyto_image_dib(wide, high, 32, NULL);
         if (!slot->hbitmap) return FALSE;
         mem_dc = CreateCompatibleDC(dst);
@@ -1744,20 +1753,126 @@ static void _viv_mipmap_free(_viv_mipmap_t *mipmap)
 #define FYTO_NEIGHBOR_BYTES (224ull * 1024 * 1024)
 // Preview pixels kept for an image that is too large to cache whole.
 #define FYTO_NEIGHBOR_PIXELS (3ull * 1024 * 1024)
-static BOOL _viv_cache_image_fits(UINT wide, UINT high, UINT frames)
+
+// What ALL the caches together may hold. The per-neighbour cap above was the
+// only budget there was, and it was applied independently to every cache: the
+// displayed frame, the cached neighbour, the last image, the 8 recent previews
+// and the 16 render slots each passed their own gate, so 24 MP photos could
+// reach ~736 MB (3x128 MB of frames plus 96 MB of previews plus 256 MB of
+// render slots) while the comment claimed 224 MB. Everything is charged to this
+// one number now and the cheapest entry is evicted when it is exceeded.
+#define FYTO_CACHE_TOTAL_BYTES (384ull * 1024 * 1024)
+
+// Pixels of one frame plus its whole mipmap chain: each halving costs a quarter
+// of the level above, so the chain is about 4/3 of the frame. Pure: safe to
+// call from the decode thread.
+static UINT64 _viv_frame_chain_bytes(UINT wide, UINT high, UINT frames)
 {
-    UINT64 pixels;
-    if (!wide || !high || !frames) return FALSE;
-    pixels = FYTO_NEIGHBOR_BYTES / 4 / frames;
+    UINT64 pixels = 0;
+    if (!wide || !high || !frames) return 0;
     for (;;)
     {
-        UINT64 level = (UINT64)wide * high;
-        if (level > pixels) return FALSE;
-        pixels -= level;
-        if (wide == 1 && high == 1) return TRUE;
+        pixels += (UINT64)wide * high;
+        if (wide == 1 && high == 1) break;
         wide = wide / 2 + (wide & 1);
         high = high / 2 + (high & 1);
     }
+    return pixels * 4 * frames;
+}
+
+// Pure predicate: does one decoded neighbour fit its own cap? Called from the
+// decode thread, so it must not touch any cache state.
+static BOOL _viv_cache_image_fits(UINT wide, UINT high, UINT frames)
+{
+    if (!wide || !high || !frames) return FALSE;
+    return _viv_frame_chain_bytes(wide, high, frames) <= FYTO_NEIGHBOR_BYTES;
+}
+
+// Everything the caches currently keep alive, in bytes. Approximation: mipmap
+// chains are charged at 4/3 of the frame even when only part was built, which
+// errs on the safe side. UI thread only.
+static UINT64 _viv_render_slot_bytes(const _viv_render_slot_t *slot)
+{
+    if (!slot->hbitmap || slot->wide < 1 || slot->high < 1) return 0;
+    return (UINT64)slot->wide * slot->high * 4;
+}
+
+static UINT64 _viv_cache_footprint(void)
+{
+    UINT64 total = 0;
+    int i;
+    for (i = 0; i < FYTO_RENDER_SLOTS; i++)
+        total += _viv_render_slot_bytes(&_viv_render_slots[i]);
+    for (i = 0; i < ARRAYSIZE(_viv_recent_previews); i++)
+    {
+        if (_viv_recent_previews[i].image.hbitmap)
+            total += (UINT64)_viv_recent_previews[i].image.wide * _viv_recent_previews[i].image.high * 4;
+    }
+    if (_viv_preview.hbitmap)
+        total += (UINT64)_viv_preview.wide * _viv_preview.high * 4;
+    if (_viv_preload_preview.hbitmap)
+        total += (UINT64)_viv_preload_preview.wide * _viv_preload_preview.high * 4;
+    total += _viv_frame_chain_bytes(_viv_image_wide, _viv_image_high, _viv_frame_loaded_count);
+    total += _viv_frame_chain_bytes(_viv_last_image_wide, _viv_last_image_high, _viv_last_frame_count);
+    total += _viv_frame_chain_bytes(_viv_preload_image_wide, _viv_preload_image_high, _viv_preload_frame_loaded_count);
+    return total;
+}
+
+// Give up the cheapest thing we hold: an unused render slot, then a recent
+// preview, then (when `allow_frames`) the cached neighbour/last image. The
+// displayed image and the displayed preview are never touched. UI thread only.
+static BOOL _viv_cache_evict_one(BOOL allow_frames)
+{
+    int i, victim = -1;
+    DWORD oldest = 0xffffffffu;
+    for (i = 0; i < FYTO_RENDER_SLOTS; i++)
+    {
+        if (_viv_render_slots[i].hbitmap && _viv_render_slots[i].used < oldest)
+        {
+            oldest = _viv_render_slots[i].used;
+            victim = i;
+        }
+    }
+    if (victim >= 0)
+    {
+        DeleteObject(_viv_render_slots[victim].hbitmap);
+        _viv_render_slots[victim].hbitmap = NULL;
+        return TRUE;
+    }
+    for (i = 0; i < ARRAYSIZE(_viv_recent_previews); i++)
+    {
+        if (_viv_recent_previews[i].image.hbitmap)
+        {
+            DeleteObject(_viv_recent_previews[i].image.hbitmap);
+            _viv_recent_previews[i].image.hbitmap = NULL;
+            return TRUE;
+        }
+    }
+    if (!allow_frames) return FALSE;
+    if (_viv_last_frames)
+    {
+        _viv_clear_frames(_viv_last_frames, _viv_last_frame_count);
+        _viv_last_frames = NULL;
+        _viv_last_frame_count = 0;
+        return TRUE;
+    }
+    if (_viv_preload_frames)
+    {
+        _viv_clear_preload_frames();
+        return TRUE;
+    }
+    return FALSE;
+}
+
+// Make room for `need` more bytes. FALSE when the caches are already down to
+// what is on screen. UI thread only.
+static BOOL _viv_cache_reserve(UINT64 need)
+{
+    while (_viv_cache_footprint() + need > FYTO_CACHE_TOTAL_BYTES)
+    {
+        if (!_viv_cache_evict_one(TRUE)) return FALSE;
+    }
+    return TRUE;
 }
 
 static void _viv_clear_preview(void)
@@ -3828,7 +3943,8 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 								
 								if (_viv_load_is_preload)
 								{
-                                    if (!_viv_cache_image_fits(first_frame->wide, first_frame->high, first_frame->frame_count))
+                                    if (!_viv_cache_image_fits(first_frame->wide, first_frame->high, first_frame->frame_count) ||
+                                        !_viv_cache_reserve(_viv_frame_chain_bytes(first_frame->wide, first_frame->high, first_frame->frame_count)))
                                     {
                                         _viv_clear_preload();
                                         _viv_cancel_load(FALSE);
@@ -15872,6 +15988,11 @@ static void _viv_remember_preview(_viv_preview_t preview)
         DeleteObject(_viv_recent_previews[slot].image.hbitmap);
     _viv_recent_previews[slot].image = preview;
     _viv_recent_previews[slot].file = *_viv_frame_fd;
+    /* Previews sit on top of the frame caches in the same budget; they are the
+       cheapest thing to drop, so trim them (never the frames) when the cap is
+       already exceeded. */
+    while (_viv_cache_footprint() > FYTO_CACHE_TOTAL_BYTES && _viv_cache_evict_one(FALSE))
+        ;
 }
 
 // Keep a small, already rendered bitmap when the full image will be freed.
