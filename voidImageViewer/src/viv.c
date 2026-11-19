@@ -12478,7 +12478,10 @@ static int _viv_toolbar_get_wide(void)
 
 static void _viv_toolbar_update_buttons(void)
 {
-    if(_viv_hwnd)InvalidateRect(_viv_hwnd,NULL,FALSE);
+	/* Only toolbar button states change here; TB_SETBUTTONINFO repaints the
+	   affected button. This used to invalidate the whole window, and it is
+	   called from _viv_check_menus(), so every menu open re-rendered the
+	   entire 24 MP image. */
 	if (_viv_toolbar_hwnd)
 	{
 		TBBUTTONINFO tbbinfo;
