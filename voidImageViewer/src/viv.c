@@ -1500,16 +1500,20 @@ static HBITMAP _viv_copy_bitmap(HBITMAP source, int wide, int high)
     copy = fyto_image_dib(wide, high, 32, NULL);
     if (src && dst && copy)
     {
+        BOOL copied;
         previous_src = SelectObject(src, source);
         previous_dst = SelectObject(dst, copy);
-        if (!previous_src || !previous_dst ||
-            !BitBlt(dst, 0, 0, wide, high, src, 0, 0, SRCCOPY))
+        copied = previous_src && previous_dst &&
+            BitBlt(dst, 0, 0, wide, high, src, 0, 0, SRCCOPY);
+        /* Restore the DC before deleting: a bitmap that is still selected into
+           a DC cannot be deleted and would leak. */
+        if (previous_src) SelectObject(src, previous_src);
+        if (previous_dst) SelectObject(dst, previous_dst);
+        if (!copied)
         {
             DeleteObject(copy);
             copy = NULL;
         }
-        if (previous_src) SelectObject(src, previous_src);
-        if (previous_dst) SelectObject(dst, previous_dst);
     }
     else if (copy)
     {
