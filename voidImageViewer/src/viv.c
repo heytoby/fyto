@@ -15204,7 +15204,15 @@ static void _viv_preload_next(void)
     if (!config_preload_next || _viv_active_load || _viv_retired_load || _viv_directory_step_count) return;
     if (!_viv_playlist_start && !_viv_random && *_viv_current_fd->cFileName)
     {
-        if (_viv_cached_directory_next(_viv_current_fd, _viv_last_is_prev, TRUE, &next, FALSE))
+        // "preload next" is only a guess. The directory cache refreshes on a
+        // change notification, and waiting for that refresh made every preload
+        // miss once the folder had been touched: the neighbour was never
+        // decoded beforehand, so each single step paid a full cold decode.
+        // A stale guess is harmless - navigation still validates the file with
+        // _viv_same_image() and drops a mismatch - so resolve the neighbour even
+        // while the cache is waiting for its rescan, and let a failed lookup
+        // schedule that rescan as before.
+        if (_viv_cached_directory_next(_viv_current_fd, _viv_last_is_prev, TRUE, &next, TRUE))
         {
             if (*next.cFileName) _viv_open(&next, 1);
         }
