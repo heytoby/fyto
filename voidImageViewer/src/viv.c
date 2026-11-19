@@ -2383,17 +2383,24 @@ static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 		case VIV_ID_HELP_HELP:
 			{
 				static const wchar_t keys[]=
-					L"← →          上一张 / 下一张\n"
-					L"Home / End   第一张 / 最后一张\n"
-					L"Space        暂停 / 继续幻灯片\n"
-					L"↑ ↓          放大 / 缩小\n"
-					L"0            适应窗口\n"
-					L"1            切换标准 / 极简模式\n"
-					L"A            显示 / 隐藏 EXIF 面板\n"
-					L"F            全屏\n"
-					L"Esc          退出全屏 / 关闭面板\n"
-					L"Ctrl + C     复制图片\n"
-					L"Del          删除当前图片";
+					L"← → / PgUp PgDn  上一张 / 下一张\n"
+					L"Home / End       第一张 / 最后一张\n"
+					L"↑ ↓              幻灯片加快 / 减慢\n"
+					L"Ctrl + ↑ ↓       动画加快 / 减慢\n"
+					L"P                暂停 / 继续幻灯片\n"
+					L"Ctrl + Space     播放 / 暂停动画\n"
+					L"Alt + Enter      全屏\n"
+					L"F11              放映幻灯片\n"
+					L"Ctrl + 0         缩放重置\n"
+					L"Ctrl + Alt + 0   1:1\n"
+					L"Alt + 1/2/3/4    窗口 50% / 100% / 200% / 自适应\n"
+					L"1                切换标准 / 极简模式\n"
+					L"A                显示 / 隐藏 EXIF 面板\n"
+					L"Ctrl + C         复制图片\n"
+					L"Ctrl + O         打开图片\n"
+					L"F2               重命名\n"
+					L"Del              删除当前图片（Shift + Del 永久删除）\n"
+					L"Esc              取消操作 / 退出全屏 / 关闭窗口";
 				MessageBoxW(_viv_hwnd,keys,config_language?L"快捷键":L"Shortcuts",MB_OK|MB_ICONINFORMATION);
 			}
 			break;
