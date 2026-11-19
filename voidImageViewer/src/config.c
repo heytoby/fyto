@@ -30,7 +30,29 @@ static void _config_write_string(HANDLE h,const char *ascii_key,const wchar_t *s
 static void _config_write_utf8(HANDLE h,const utf8_t *s);
 static void _config_save_settings_by_location(const wchar_t *path,int is_root);
 
+// ini_get_int, but reports whether the key was present at all. -1 is a safe
+// "absent" probe for these 0/1 flags.
+static int _config_load_flag(ini_t *ini,const utf8_t *key,int default_value,BYTE *present)
+{
+	int value;
+
+	value = ini_get_int(ini,key,-1);
+
+	if (value >= 0)
+	{
+		*present = 1;
+
+		return value;
+	}
+
+	return default_value;
+}
+
 static int config_defaults_version = 0;
+// Set when the loaded ini actually carried the key. Display defaults are applied
+// only for keys no ini set, so a value the user (or installed-defaults.ini)
+// wrote is never replaced behind their back.
+static BYTE _config_has_show_exif, _config_has_show_status, _config_has_show_controls;
 int config_show_exif = 0;
 // Ask at startup when the selected image formats are not opened by fyto.
 int config_middle_click_action = 1; // 0=drag only, 1=toggle fit/100%; drag remains available
@@ -108,7 +130,7 @@ static void _config_load_settings_by_location(const wchar_t *path,int is_root)
 	if (ini)
 	{
         config_defaults_version = ini_get_int(ini,(const utf8_t *)"defaults_version",config_defaults_version);
-		config_show_exif = !!ini_get_int(ini,(const utf8_t *)"show_exif",config_show_exif);
+		config_show_exif = !!_config_load_flag(ini,(const utf8_t *)"show_exif",config_show_exif,&_config_has_show_exif);
 		config_middle_click_action = ini_get_int(ini,(const utf8_t *)"middle_click_action",config_middle_click_action) == 1;
 		config_language = ini_get_int(ini,(const utf8_t *)"language",config_language) == 1 ? 1 : 0;
 		config_x = ini_get_int(ini,(const utf8_t *)"x",config_x);
@@ -129,9 +151,9 @@ static void _config_load_settings_by_location(const wchar_t *path,int is_root)
 		config_show_caption = ini_get_int(ini,(const utf8_t *)"show_caption",config_show_caption);
 		config_show_thickframe = ini_get_int(ini,(const utf8_t *)"show_thickframe",config_show_thickframe);
 		config_show_menu = ini_get_int(ini,(const utf8_t *)"show_menu",config_show_menu);
-		config_show_status = ini_get_int(ini,(const utf8_t *)"show_status",config_show_status);
+		config_show_status = (BYTE)_config_load_flag(ini,(const utf8_t *)"show_status",config_show_status,&_config_has_show_status);
 		config_pixel_info = ini_get_int(ini,(const utf8_t *)"statusbar_pixel_info",config_pixel_info);
-		config_show_controls = ini_get_int(ini,(const utf8_t *)"show_controls",config_show_controls);
+		config_show_controls = (BYTE)_config_load_flag(ini,(const utf8_t *)"show_controls",config_show_controls,&_config_has_show_controls);
 		config_auto_zoom = ini_get_int(ini,(const utf8_t *)"auto_zoom",config_auto_zoom);
 		config_auto_zoom_type = ini_get_int(ini,(const utf8_t *)"auto_zoom_type",config_auto_zoom_type);
 		config_auto_fit_wide_mul = ini_get_int(ini,(const utf8_t *)"auto_fit_wide_mul",config_auto_fit_wide_mul);
@@ -274,10 +296,12 @@ void config_load_settings(void)
         if (config_mouse_wheel_action == 2) config_mouse_wheel_action = 1;
         config_defaults_version = 5;
     }
-    // Global defaults apply on first use; loaded display flags remain authoritative.
-    config_show_status=config_show_caption || config_show_menu;
-    config_show_controls=0;
-	config_show_exif=0;
+    // Display flags only default when the ini had no value for them: a loaded
+    // value stays authoritative, and these must not be written back over it on
+    // every start.
+    if (!_config_has_show_status) config_show_status=config_show_caption || config_show_menu;
+    if (!_config_has_show_controls) config_show_controls=0;
+    if (!_config_has_show_exif) config_show_exif=0;
 }
 
 
