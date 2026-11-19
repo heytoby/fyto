@@ -215,8 +215,8 @@ IDI_BESTFIT             ICON                    "bestfit.ico"
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,66
- PRODUCTVERSION 1,0,0,66
+ FILEVERSION 1,0,0,67
+ PRODUCTVERSION 1,0,0,67
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -232,12 +232,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "FileDescription", "fyto"
-            VALUE "FileVersion", "1.0.0.66"
+            VALUE "FileVersion", "1.0.0.67"
             VALUE "InternalName", "fyto"
             VALUE "LegalCopyright", "Copyright © 2026 voidtools"
             VALUE "OriginalFilename", "fyto.exe"
             VALUE "ProductName", "fyto"
-            VALUE "ProductVersion", "1.0.0.66"
+            VALUE "ProductVersion", "1.0.0.67"
         END
     END
     BLOCK "VarFileInfo"
