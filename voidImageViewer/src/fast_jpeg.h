@@ -224,8 +224,16 @@ static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT 
     source = (IWICBitmapSource *)jpeg->frame;
     if (jpeg->profile)
     {
-        if (!fyto_wic_color_transform(jpeg, source, &GUID_WICPixelFormat24bppBGR, &color)) goto done;
-        source = (IWICBitmapSource *)color;
+        /* A profile WIC refuses to apply must not cost us the image: fall back
+           to the untransformed frame (the same thing a corrupt profile gets
+           from every other viewer) instead of failing the whole decode. */
+        if (fyto_wic_color_transform(jpeg, source, &GUID_WICPixelFormat24bppBGR, &color))
+            source = (IWICBitmapSource *)color;
+        else
+        {
+            if (color) IWICColorTransform_Release(color);
+            color = NULL;
+        }
     }
     if (FAILED(IWICImagingFactory_CreateFormatConverter(jpeg->factory, &converter))) goto done;
     if (FAILED(IWICFormatConverter_Initialize(converter, source,
@@ -299,8 +307,8 @@ static HBITMAP fyto_jpeg_preview(const fyto_wic_image *jpeg, UINT edge, UINT *wi
             HBITMAP colored = NULL;
             if (GetObject(bitmap, sizeof(dib), &dib))
                 colored = fyto_jpeg_color_preview(jpeg, dib.bmBits, *wide, *high, dib.bmWidthBytes);
-            DeleteObject(bitmap);
-            bitmap = colored;
+            /* Keep the untransformed preview when the profile cannot be applied. */
+            if (colored) { DeleteObject(bitmap); bitmap = colored; }
         }
         if (bitmap || fyto_jpeg_cancelled(jpeg)) return bitmap;
     }

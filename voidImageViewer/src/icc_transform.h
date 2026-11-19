@@ -23,6 +23,10 @@
 #define FYTO_ICC_UNSUPPORTED 3
 
 #define FYTO_ICC_ENCODE_SIZE 4096
+/* Upper bound on a sampled 'curv' table. Real TRC tables hold 1024 or 4096
+   entries; anything larger is treated as a malformed profile so the caller
+   falls back to WIC instead of trusting a 32-bit count from the file. */
+#define FYTO_ICC_CURVE_MAX 65536
 
 typedef struct fyto_icc_s
 {
@@ -72,7 +76,7 @@ static BOOL fyto_icc_find_tag(const BYTE *data, UINT size, DWORD sig, fyto_icc_t
 	UINT count, i, base = 128;
 	if (size < base + 4) return FALSE;
 	count = fyto_icc_rd32(data + base);
-	if (count > 0x10000 || size < base + 4 + count * 12) return FALSE;
+	if ((UINT64)count > 0x10000 || (UINT64)size < (UINT64)base + 4 + (UINT64)count * 12) return FALSE;
 	for (i = 0; i < count; i++)
 	{
 		const BYTE *entry = data + base + 4 + i * 12;
@@ -86,12 +90,26 @@ static BOOL fyto_icc_find_tag(const BYTE *data, UINT size, DWORD sig, fyto_icc_t
 	return FALSE;
 }
 
+/* Payload bytes that really exist for one tag. Derived from the profile length
+ * we were handed and only then clamped by the tag length, so a crafted
+ * offset/size/count can never make a read run past the buffer. */
+static UINT64 fyto_icc_tag_avail(UINT size, const fyto_icc_tag_t *tag)
+{
+	UINT64 avail;
+	if (tag->offset > size) return 0;
+	avail = (UINT64)size - tag->offset;
+	if ((UINT64)tag->size < avail) avail = tag->size;
+	return avail;
+}
+
 /* Evaluate a curve/parametricCurve tag into a 256 entry lookup table. */
 static BOOL fyto_icc_build_curve(const BYTE *data, UINT size, const fyto_icc_tag_t *tag, float out[256])
 {
 	const BYTE *p;
+	UINT64 avail;
 	int i;
-	if (tag->size < 12) return FALSE;
+	avail = fyto_icc_tag_avail(size, tag);
+	if (avail < 12) return FALSE;
 	p = data + tag->offset;
 	if (fyto_icc_rd32(p) == 0x63757276) /* 'curv' */
 	{
@@ -103,12 +121,17 @@ static BOOL fyto_icc_build_curve(const BYTE *data, UINT size, const fyto_icc_tag
 		}
 		if (count == 1)
 		{
-			float gamma = (float)fyto_icc_rd16(p + 12) / 256.0f;
+			float gamma;
+			if (avail < 14) return FALSE; /* uInt16 gamma */
+			gamma = (float)fyto_icc_rd16(p + 12) / 256.0f;
 			if (gamma <= 0.0f) return FALSE;
 			for (i = 0; i < 256; i++) out[i] = (float)pow((double)i / 255.0, gamma);
 			return TRUE;
 		}
-		if (tag->size < 12 + count * 2) return FALSE;
+		/* `count` uInt16 entries. 64-bit length check first: count*2 used to
+		   wrap in 32 bits, letting a crafted count index ~4 GB past the tag. */
+		if (count > FYTO_ICC_CURVE_MAX) return FALSE;
+		if (avail < 12ull + (UINT64)count * 2) return FALSE;
 		for (i = 0; i < 256; i++)
 		{
 			/* Sample the uInt16 table with linear interpolation. */
@@ -116,8 +139,8 @@ static BOOL fyto_icc_build_curve(const BYTE *data, UINT size, const fyto_icc_tag
 			DWORD i0 = (DWORD)t;
 			DWORD i1 = i0 + 1 < count ? i0 + 1 : i0;
 			double f = t - i0;
-			double v0 = fyto_icc_rd16(p + 12 + i0 * 2) / 65535.0;
-			double v1 = fyto_icc_rd16(p + 12 + i1 * 2) / 65535.0;
+			double v0 = fyto_icc_rd16(p + 12 + (SIZE_T)i0 * 2) / 65535.0;
+			double v1 = fyto_icc_rd16(p + 12 + (SIZE_T)i1 * 2) / 65535.0;
 			out[i] = (float)(v0 + (v1 - v0) * f);
 		}
 		return TRUE;
@@ -125,15 +148,25 @@ static BOOL fyto_icc_build_curve(const BYTE *data, UINT size, const fyto_icc_tag
 	if (fyto_icc_rd32(p) == 0x70617261) /* 'para' */
 	{
 		WORD type = fyto_icc_rd16(p + 8);
+		UINT64 need;
 		float g = 1.0f, a = 1.0f, b = 0.0f, c = 0.0f, d = 0.0f, e = 0.0f, f = 0.0f;
+		switch (type)
+		{
+			case 0: need = 16; break;
+			case 1: need = 24; break;
+			case 2: need = 28; break;
+			case 3: need = 32; break;
+			case 4: need = 40; break;
+			default: return FALSE;
+		}
+		if (avail < need) return FALSE;
 		switch (type)
 		{
 			case 0: g = fyto_icc_s15f16(p + 12); break;
 			case 1: g = fyto_icc_s15f16(p + 12); a = fyto_icc_s15f16(p + 16); b = fyto_icc_s15f16(p + 20); break;
 			case 2: g = fyto_icc_s15f16(p + 12); a = fyto_icc_s15f16(p + 16); b = fyto_icc_s15f16(p + 20); c = fyto_icc_s15f16(p + 24); break;
 			case 3: g = fyto_icc_s15f16(p + 12); a = fyto_icc_s15f16(p + 16); b = fyto_icc_s15f16(p + 20); c = fyto_icc_s15f16(p + 24); d = fyto_icc_s15f16(p + 28); break;
-			case 4: g = fyto_icc_s15f16(p + 12); a = fyto_icc_s15f16(p + 16); b = fyto_icc_s15f16(p + 20); c = fyto_icc_s15f16(p + 24); d = fyto_icc_s15f16(p + 28); e = fyto_icc_s15f16(p + 32); f = fyto_icc_s15f16(p + 36); break;
-			default: return FALSE;
+			default: g = fyto_icc_s15f16(p + 12); a = fyto_icc_s15f16(p + 16); b = fyto_icc_s15f16(p + 20); c = fyto_icc_s15f16(p + 24); d = fyto_icc_s15f16(p + 28); e = fyto_icc_s15f16(p + 32); f = fyto_icc_s15f16(p + 36); break;
 		}
 		if (g <= 0.0f || a == 0.0f) return FALSE;
 		for (i = 0; i < 256; i++)
@@ -154,10 +187,11 @@ static BOOL fyto_icc_build_curve(const BYTE *data, UINT size, const fyto_icc_tag
 	return FALSE;
 }
 
-static BOOL fyto_icc_read_xyz(const BYTE *data, const fyto_icc_tag_t *tag, float out[3])
+static BOOL fyto_icc_read_xyz(const BYTE *data, UINT size, const fyto_icc_tag_t *tag, float out[3])
 {
 	const BYTE *p;
-	if (tag->size < 20 || fyto_icc_rd32(data + tag->offset) != 0x58595A20) return FALSE; /* 'XYZ ' */
+	if (fyto_icc_tag_avail(size, tag) < 20) return FALSE;
+	if (fyto_icc_rd32(data + tag->offset) != 0x58595A20) return FALSE; /* 'XYZ ' */
 	p = data + tag->offset + 8;
 	out[0] = fyto_icc_s15f16(p);
 	out[1] = fyto_icc_s15f16(p + 4);
@@ -233,9 +267,9 @@ static void fyto_icc_parse(const BYTE *data, UINT size, fyto_icc_t *out)
 		out->state = FYTO_ICC_UNSUPPORTED;
 		return;
 	}
-	if (!fyto_icc_read_xyz(data, &rtag, colorant[0]) ||
-		!fyto_icc_read_xyz(data, &gtag, colorant[1]) ||
-		!fyto_icc_read_xyz(data, &btag, colorant[2]) ||
+	if (!fyto_icc_read_xyz(data, size, &rtag, colorant[0]) ||
+		!fyto_icc_read_xyz(data, size, &gtag, colorant[1]) ||
+		!fyto_icc_read_xyz(data, size, &btag, colorant[2]) ||
 		!fyto_icc_build_curve(data, size, &rt, out->decode[0]) ||
 		!fyto_icc_build_curve(data, size, &gt, out->decode[1]) ||
 		!fyto_icc_build_curve(data, size, &bt, out->decode[2]))
