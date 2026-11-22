@@ -41,6 +41,8 @@ if($LASTEXITCODE -ne 0){throw 'JPEG test build failed'}
 if($LASTEXITCODE -ne 0){throw 'JPEG decoding regression'}
 & $msbuild (Join-Path $root 'voidImageViewer/vs2019/voidImageViewer.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
 if($LASTEXITCODE -ne 0){throw 'Viewer build failed'}
+& python (Join-Path $root 'tests/test_fyto_order.py') (Join-Path $root 'voidImageViewer/vs2019/x64/Release/fyto.exe')
+if($LASTEXITCODE -ne 0){throw 'Native viewer navigation regression failed'}
 $build=Join-Path $root 'build';$payload=Join-Path $build 'payload';$out=Join-Path $root 'release-assets'
 New-Item -ItemType Directory -Force $payload,$out | Out-Null
 Copy-Item (Join-Path $root 'voidImageViewer/vs2019/x64/Release/fyto.exe') $payload
