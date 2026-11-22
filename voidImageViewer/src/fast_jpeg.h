@@ -19,6 +19,7 @@ typedef struct fyto_wic_image {
     IWICColorContext *profile, *srgb;
     UINT wide, high;
 #ifdef FYTO_HAVE_TURBO_JPEG
+    IStream *input_stream;
     HGLOBAL input_handle;
     const BYTE *input_data;
     size_t input_size;
@@ -50,6 +51,9 @@ static void fyto_jpeg_set_input(fyto_wic_image *jpeg, IStream *stream,
     BOOL (*cancelled)(void *), void *context)
 {
     HGLOBAL handle;
+    jpeg->input_stream = stream;
+    jpeg->cancelled = cancelled;
+    jpeg->cancel_context = context;
     if (SUCCEEDED(GetHGlobalFromStream(stream, &handle)))
     {
         jpeg->input_data = (const BYTE *)GlobalLock(handle);
@@ -61,6 +65,13 @@ static void fyto_jpeg_set_input(fyto_wic_image *jpeg, IStream *stream,
             jpeg->cancel_context = context;
         }
     }
+}
+static HBITMAP fyto_jpeg_decode_image(const fyto_wic_image *jpeg,
+    UINT denominator, UINT bits, UINT *wide, UINT *high)
+{
+    return fyto_jpeg_decode_input(jpeg->input_data ? NULL : jpeg->input_stream,
+        jpeg->input_data, jpeg->input_size, jpeg->wide, jpeg->high,
+        denominator, bits, wide, high, jpeg->cancelled, jpeg->cancel_context);
 }
 static BOOL fyto_jpeg_cancelled(const fyto_wic_image *jpeg)
 {
@@ -210,9 +221,7 @@ static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT 
        sRGB-equivalent ones cost nothing. Only exotic profiles use WIC. */
     if (jpeg->icc.state != FYTO_ICC_UNSUPPORTED && transform == WICBitmapTransformRotate0)
     {
-        bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
-            jpeg->wide, jpeg->high, 1, 32, wide, high,
-            jpeg->cancelled, jpeg->cancel_context);
+        bitmap = fyto_jpeg_decode_image(jpeg, 1, 32, wide, high);
         if (bitmap)
         {
             fyto_icc_apply_bitmap(jpeg, bitmap);
@@ -296,9 +305,7 @@ static HBITMAP fyto_jpeg_preview(const fyto_wic_image *jpeg, UINT edge, UINT *wi
         UINT denominator = 4;
         UINT preview_edge = min(edge, (image_edge + 3) / 4);
         if ((image_edge + 3) / 4 > preview_edge) denominator = 8;
-        bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
-            jpeg->wide, jpeg->high, denominator, 24, wide, high,
-            jpeg->cancelled, jpeg->cancel_context);
+        bitmap = fyto_jpeg_decode_image(jpeg, denominator, 24, wide, high);
         if (bitmap && jpeg->icc.state == FYTO_ICC_MATRIX)
             fyto_icc_apply_bitmap(jpeg, bitmap);
         else if (bitmap && jpeg->profile && jpeg->icc.state == FYTO_ICC_UNSUPPORTED)

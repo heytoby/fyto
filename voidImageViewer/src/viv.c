@@ -1742,44 +1742,7 @@ static BOOL _viv_render_same_file(const _viv_render_slot_t *slot, const WIN32_FI
         CompareFileTime(&slot->write_time, &file->ftLastWriteTime) == 0;
 }
 
-static HBITMAP _viv_copy_bitmap(HBITMAP source, int wide, int high)
-{
-    HDC screen, src, dst;
-    HBITMAP copy;
-    HGDIOBJ previous_src, previous_dst;
-    if (!source || wide < 1 || high < 1) return NULL;
-    screen = GetDC(NULL);
-    if (!screen) return NULL;
-    src = CreateCompatibleDC(screen);
-    dst = CreateCompatibleDC(screen);
-    copy = fyto_image_dib(wide, high, 32, NULL);
-    if (src && dst && copy)
-    {
-        BOOL copied;
-        previous_src = SelectObject(src, source);
-        previous_dst = SelectObject(dst, copy);
-        copied = previous_src && previous_dst &&
-            BitBlt(dst, 0, 0, wide, high, src, 0, 0, SRCCOPY);
-        /* Restore the DC before deleting: a bitmap that is still selected into
-           a DC cannot be deleted and would leak. */
-        if (previous_src) SelectObject(src, previous_src);
-        if (previous_dst) SelectObject(dst, previous_dst);
-        if (!copied)
-        {
-            DeleteObject(copy);
-            copy = NULL;
-        }
-    }
-    else if (copy)
-    {
-        DeleteObject(copy);
-        copy = NULL;
-    }
-    if (src) DeleteDC(src);
-    if (dst) DeleteDC(dst);
-    ReleaseDC(NULL, screen);
-    return copy;
-}
+
 
 static _viv_render_slot_t *_viv_render_find(const wchar_t *name, const WIN32_FIND_DATA *file,
     int frame, int wide, int high)
@@ -1850,19 +1813,17 @@ static BOOL _viv_render_restore(const WIN32_FIND_DATA *file, _viv_preview_t *pre
     for (i = 0; i < FYTO_RENDER_SLOTS; i++)
     {
         _viv_render_slot_t *slot = &_viv_render_slots[i];
-        HBITMAP copy;
-        if (!slot->hbitmap || slot->frame != 0) continue;
-        if (!_viv_render_same_file(slot, file)) continue;
-        if (wcscmp(slot->name, file->cFileName) != 0) continue;
-        copy = _viv_copy_bitmap(slot->hbitmap, slot->wide, slot->high);
-        if (!copy) return FALSE;
-        preview->hbitmap = copy;
+        if (!slot->hbitmap || slot->frame != 0 ||
+            !_viv_render_same_file(slot, file) ||
+            wcscmp(slot->name, file->cFileName) != 0) continue;
+        preview->hbitmap = slot->hbitmap;
         preview->wide = slot->wide;
         preview->high = slot->high;
         preview->image_wide = slot->image_wide;
         preview->image_high = slot->image_high;
-        preview->defer_detail = FALSE;
-        slot->used = ++_viv_render_stamp;
+        preview->defer_detail = TRUE;
+        preview->display = TRUE;
+        slot->hbitmap = NULL;
         return TRUE;
     }
     return FALSE;
@@ -2275,16 +2236,44 @@ static void _viv_clear_frames(_viv_frame_t *frames,int loaded_count)
 	mem_free(frames);
 }
 
+typedef struct _viv_frame_release_s
+{
+    _viv_frame_t *frames;
+    int count;
+} _viv_frame_release_t;
+static volatile LONG _viv_frame_release_count;
+
+static DWORD WINAPI _viv_release_frames_worker(void *context)
+{
+    _viv_frame_release_t *release = context;
+    _viv_clear_frames(release->frames, release->count);
+    mem_free(release);
+    InterlockedDecrement(&_viv_frame_release_count);
+    return 0;
+}
+
 static void _viv_process_pending_clear(void)
 {
-	if (_viv_pending_clear_frames)
-	{
-		_viv_clear_frames(_viv_pending_clear_frames,_viv_pending_clear_frame_loaded_count);
-		
-		_viv_pending_clear_frames = NULL;
-	}
-
-	_viv_pending_clear_frame_loaded_count = 0;
+    _viv_frame_release_t *release;
+    if (!_viv_pending_clear_frames) return;
+    release = mem_alloc(sizeof(*release));
+    if (release)
+    {
+        release->frames = _viv_pending_clear_frames;
+        release->count = _viv_pending_clear_frame_loaded_count;
+        if (InterlockedIncrement(&_viv_frame_release_count) <= 2 &&
+            QueueUserWorkItem(_viv_release_frames_worker, release, WT_EXECUTEDEFAULT))
+        {
+            _viv_pending_clear_frames = NULL;
+            _viv_pending_clear_frame_loaded_count = 0;
+            return;
+        }
+        InterlockedDecrement(&_viv_frame_release_count);
+        mem_free(release);
+    }
+    _viv_clear_frames(_viv_pending_clear_frames, _viv_pending_clear_frame_loaded_count);
+    _viv_pending_clear_frames = NULL;
+    _viv_pending_clear_frame_loaded_count = 0;
 }
 
 static LONG _viv_load_stop_state(_viv_load_job_t *job)
@@ -11918,9 +11907,7 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
     for (denominator = 8; denominator > 1; denominator >>= 1)
         if ((jpeg->wide + denominator - 1) / denominator >= decode_target_wide &&
             (jpeg->high + denominator - 1) / denominator >= decode_target_high) break;
-    bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
-        jpeg->wide, jpeg->high, denominator, 32, &wide, &high,
-        jpeg->cancelled, jpeg->cancel_context);
+    bitmap = fyto_jpeg_decode_image(jpeg, denominator, 32, &wide, &high);
     if (!bitmap) return FALSE;
     scaled = bitmap;
     if (wide != decode_target_wide || high != decode_target_high)
@@ -12090,6 +12077,21 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 
 			size = GetFileSize(h,0);
 			
+            {
+                BYTE signature[3];
+                DWORD bytes_read = 0;
+                LARGE_INTEGER beginning = {0};
+                jpeg_file = size >= 3 && size != INVALID_FILE_SIZE &&
+                    ReadFile(h, signature, sizeof(signature), &bytes_read, NULL) &&
+                    bytes_read == sizeof(signature) && signature[0] == 0xff &&
+                    signature[1] == 0xd8 && signature[2] == 0xff;
+                SetFilePointerEx(h, beginning, NULL, FILE_BEGIN);
+            }
+            if (jpeg_file)
+                SHCreateStreamOnFileEx(job->filename, STGM_READ | STGM_SHARE_DENY_NONE,
+                    FILE_ATTRIBUTE_NORMAL, FALSE, NULL, &stream);
+            if (!stream)
+            {
 			global_handle = GlobalAlloc(GMEM_MOVEABLE,size);
 			if (global_handle)
 			{
@@ -12175,6 +12177,8 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 					GlobalFree(global_handle);
 				}
 			}
+
+            }
 
 			CloseHandle(h);
 		}
@@ -16458,6 +16462,7 @@ static void viv_copy_current_image_to_last_image(void)
            file read and decode. */
         if (config_cache_last && *_viv_frame_fd->cFileName)
         {
+            _viv_preview.defer_detail = TRUE;
             _viv_remember_preview(_viv_preview);
             _viv_preview.hbitmap = NULL;
         }
