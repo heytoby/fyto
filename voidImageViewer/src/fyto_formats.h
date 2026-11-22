@@ -151,7 +151,11 @@ static int fyto_open_format_picker(HWND owner,unsigned index)
     ZeroMemory(&info,sizeof(info));
     info.pcszFile=path;
     info.oaifInFlags=OAIF_ALLOW_REGISTRATION|OAIF_REGISTER_EXT|OAIF_EXEC;
-    return SHOpenWithDialog(owner,&info)==S_OK;
+    {
+        typedef HRESULT (WINAPI *open_with_t)(HWND,const OPENASINFO *);
+        open_with_t open_with=(open_with_t)GetProcAddress(GetModuleHandleW(L"shell32.dll"),"SHOpenWithDialog");
+        return open_with ? open_with(owner,&info)==S_OK : -1;
+    }
 }
 static DWORD fyto_initial_format_selection(void)
 {

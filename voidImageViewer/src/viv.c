@@ -257,7 +257,10 @@
 #define _VIV_STRETCH_BLT_STITCH_SIZE		512
 
 #include "viv.h"
+#include <dwmapi.h>
+static COLORREF _viv_exif_background(void);
 #include "fast_jpeg.h"
+#include "bitmap_orientation.h"
 #include "jpeg_stream.h"
 #if defined(_M_X64) || defined(__x86_64__)
 #include <emmintrin.h>
@@ -11920,7 +11923,7 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
         jpeg->cancelled, jpeg->cancel_context);
     if (!bitmap) return FALSE;
     if (orientation > 1) {
-        HBITMAP oriented = _viv_orientate_hbitmap(bitmap, orientation);
+        HBITMAP oriented = fyto_orient_display_bitmap(bitmap, orientation, _viv_load_discarded, job);
         DeleteObject(bitmap);
         bitmap = oriented;
         if (!bitmap) return FALSE;

@@ -21,6 +21,10 @@ if($LASTEXITCODE -ne 0){throw 'Navigation test preparation failed'}
 if($LASTEXITCODE -ne 0){throw 'Navigation test build failed'}
 & (Join-Path $root 'build/navigation-tests/test_navigation.exe')
 if($LASTEXITCODE -ne 0){throw 'Navigation regression failed'}
+& $msbuild (Join-Path $root 'tests/orientation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Orientation test build failed'}
+& (Join-Path $root 'build/orientation-tests/test_bitmap_orientation.exe')
+if($LASTEXITCODE -ne 0){throw 'Orientation regression failed'}
 & python (Join-Path $root 'tests/prepare_presentation_test.py')
 if($LASTEXITCODE -ne 0){throw 'Presentation test preparation failed'}
 & $msbuild (Join-Path $root 'tests/presentation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
