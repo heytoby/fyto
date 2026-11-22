@@ -1,0 +1,32 @@
+name: Verify fyto repair candidate
+on:
+  push:
+    branches: ['repair/fyto-71']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Prepare decoder tools
+        shell: pwsh
+        run: |
+          if (!(Get-Command nasm -ErrorAction SilentlyContinue) -and !(Test-Path 'C:/Program Files/NASM/nasm.exe')) {
+            choco install nasm --version=2.16.03 --yes --no-progress
+            if ($LASTEXITCODE) { throw 'NASM install failed' }
+          }
+          python -m pip install --disable-pip-version-check --quiet pillow
+      - name: Build and run regression checks
+        shell: pwsh
+        run: ./scripts/Build-Release.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fyto-repair71-windows
+          path: |
+            release-assets/*
+            build/payload/fyto.exe
+            build/payload/BUILD_INFO.json

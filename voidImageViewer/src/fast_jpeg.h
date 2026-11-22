@@ -10,6 +10,7 @@
 #include <initguid.h>
 #endif
 #include <wincodec.h>
+#include "icc_transform.h"
 
 typedef struct fyto_wic_image {
     IWICImagingFactory *factory;
@@ -24,6 +25,7 @@ typedef struct fyto_wic_image {
     BOOL (*cancelled)(void *);
     void *cancel_context;
 #endif
+    fyto_icc_t icc;
 } fyto_wic_image;
 
 static HBITMAP fyto_image_dib(UINT wide, UINT high, UINT bit_count, BYTE **pixels)
@@ -78,17 +80,50 @@ static void fyto_wic_close(fyto_wic_image *jpeg)
     if (jpeg->factory) IWICImagingFactory_Release(jpeg->factory);
 }
 
+static void fyto_icc_apply_bitmap(const fyto_wic_image *jpeg, HBITMAP bitmap)
+{
+    BITMAP dib;
+    INT height;
+    if (!bitmap || jpeg->icc.state != FYTO_ICC_MATRIX) return;
+    if (GetObject(bitmap, sizeof(dib), &dib) != sizeof(dib) || !dib.bmBits) return;
+    if (dib.bmBitsPixel != 24 && dib.bmBitsPixel != 32) return;
+    height = dib.bmHeight < 0 ? -dib.bmHeight : dib.bmHeight;
+    fyto_icc_apply((BYTE *)dib.bmBits, (UINT)dib.bmWidth, (UINT)height,
+        (UINT)dib.bmWidthBytes, dib.bmBitsPixel, &jpeg->icc);
+}
+
+/* Read the profile once and reduce it to a 3x3 matrix plus tone-curve tables. */
+#ifdef FYTO_HAVE_TURBO_JPEG
+static void fyto_icc_load(fyto_wic_image *jpeg)
+{
+    UINT size = 0;
+    BYTE *bytes;
+    if (!jpeg->profile) return;
+    if (FAILED(IWICColorContext_GetProfileBytes(jpeg->profile, 0, NULL, &size))) return;
+    if (!size || size > 4u * 1024 * 1024) return;
+    bytes = (BYTE *)malloc(size);
+    if (!bytes) return;
+    if (SUCCEEDED(IWICColorContext_GetProfileBytes(jpeg->profile, size, bytes, &size)))
+        fyto_icc_parse(bytes, size, &jpeg->icc);
+    free(bytes);
+}
+#endif
+
 static BOOL fyto_wic_set_color(fyto_wic_image *jpeg)
 {
     UINT count = 0;
     if (FAILED(IWICBitmapFrameDecode_GetColorContexts(jpeg->frame, 0, NULL, &count))) return FALSE;
     if (!count) return TRUE;
-    return count == 1 &&
+    if (!(count == 1 &&
         SUCCEEDED(IWICImagingFactory_CreateColorContext(jpeg->factory, &jpeg->profile)) &&
         SUCCEEDED(IWICBitmapFrameDecode_GetColorContexts(jpeg->frame, 1, &jpeg->profile, &count)) &&
         count == 1 &&
         SUCCEEDED(IWICImagingFactory_CreateColorContext(jpeg->factory, &jpeg->srgb)) &&
-        SUCCEEDED(IWICColorContext_InitializeFromExifColorSpace(jpeg->srgb, 1));
+        SUCCEEDED(IWICColorContext_InitializeFromExifColorSpace(jpeg->srgb, 1)))) return FALSE;
+#ifdef FYTO_HAVE_TURBO_JPEG
+    fyto_icc_load(jpeg);
+#endif
+    return TRUE;
 }
 
 static BOOL fyto_wic_open(fyto_wic_image *image, const CLSID *codec, IStream *stream, WICPixelFormatGUID *format)
@@ -170,20 +205,35 @@ static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT 
     HBITMAP bitmap = NULL;
 
 #ifdef FYTO_HAVE_TURBO_JPEG
-    /* Decode ordinary RGB/gray images directly into the final DIB. */
-    if (!jpeg->profile && transform == WICBitmapTransformRotate0)
+    /* Decode RGB/gray images directly into the final DIB. An ICC profile no
+       longer forces the WIC path: matrix/TRC profiles are converted here and
+       sRGB-equivalent ones cost nothing. Only exotic profiles use WIC. */
+    if (jpeg->icc.state != FYTO_ICC_UNSUPPORTED && transform == WICBitmapTransformRotate0)
     {
         bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
             jpeg->wide, jpeg->high, 1, 32, wide, high,
             jpeg->cancelled, jpeg->cancel_context);
-        if (bitmap || fyto_jpeg_cancelled(jpeg)) return bitmap;
+        if (bitmap)
+        {
+            fyto_icc_apply_bitmap(jpeg, bitmap);
+            return bitmap;
+        }
+        if (fyto_jpeg_cancelled(jpeg)) return NULL;
     }
 #endif
     source = (IWICBitmapSource *)jpeg->frame;
     if (jpeg->profile)
     {
-        if (!fyto_wic_color_transform(jpeg, source, &GUID_WICPixelFormat24bppBGR, &color)) goto done;
-        source = (IWICBitmapSource *)color;
+        /* A profile WIC refuses to apply must not cost us the image: fall back
+           to the untransformed frame (the same thing a corrupt profile gets
+           from every other viewer) instead of failing the whole decode. */
+        if (fyto_wic_color_transform(jpeg, source, &GUID_WICPixelFormat24bppBGR, &color))
+            source = (IWICBitmapSource *)color;
+        else
+        {
+            if (color) IWICColorTransform_Release(color);
+            color = NULL;
+        }
     }
     if (FAILED(IWICImagingFactory_CreateFormatConverter(jpeg->factory, &converter))) goto done;
     if (FAILED(IWICFormatConverter_Initialize(converter, source,
@@ -249,14 +299,16 @@ static HBITMAP fyto_jpeg_preview(const fyto_wic_image *jpeg, UINT edge, UINT *wi
         bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
             jpeg->wide, jpeg->high, denominator, 24, wide, high,
             jpeg->cancelled, jpeg->cancel_context);
-        if (bitmap && jpeg->profile)
+        if (bitmap && jpeg->icc.state == FYTO_ICC_MATRIX)
+            fyto_icc_apply_bitmap(jpeg, bitmap);
+        else if (bitmap && jpeg->profile && jpeg->icc.state == FYTO_ICC_UNSUPPORTED)
         {
             BITMAP dib;
             HBITMAP colored = NULL;
             if (GetObject(bitmap, sizeof(dib), &dib))
                 colored = fyto_jpeg_color_preview(jpeg, dib.bmBits, *wide, *high, dib.bmWidthBytes);
-            DeleteObject(bitmap);
-            bitmap = colored;
+            /* Keep the untransformed preview when the profile cannot be applied. */
+            if (colored) { DeleteObject(bitmap); bitmap = colored; }
         }
         if (bitmap || fyto_jpeg_cancelled(jpeg)) return bitmap;
     }

@@ -132,8 +132,18 @@ static BOOL fyto_draw_menu(DRAWITEMSTRUCT *draw)
     saved = SaveDC(dc);
     selected = (draw->itemState & ODS_SELECTED)!=0;
     disabled = (draw->itemState & (ODS_DISABLED | ODS_GRAYED))!=0;
-    color = GetSysColor(disabled?COLOR_GRAYTEXT:selected?COLOR_HIGHLIGHTTEXT:COLOR_MENUTEXT);
-    FillRect(dc,&text,GetSysColorBrush(selected?COLOR_HIGHLIGHT:COLOR_MENU));
+    /* Use the cached theme brushes; never allocate GDI objects while painting. */
+    if (fyto_menu_brush)
+    {
+        COLORREF bg = selected ? fyto_menu_selected_background : fyto_menu_background;
+        FillRect(dc,&text,selected ? (fyto_menu_selected_brush ? fyto_menu_selected_brush : fyto_menu_brush) : fyto_menu_brush);
+        color = disabled ? ui_muted(bg) : ui_text(bg);
+    }
+    else
+    {
+        color = GetSysColor(disabled?COLOR_GRAYTEXT:selected?COLOR_HIGHLIGHTTEXT:COLOR_MENUTEXT);
+        FillRect(dc,&text,GetSysColorBrush(selected?COLOR_HIGHLIGHT:COLOR_MENU));
+    }
 
     SelectObject(dc,fyto_menu_font);
     SetTextColor(dc,color);

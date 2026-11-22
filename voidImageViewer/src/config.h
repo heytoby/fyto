@@ -91,6 +91,7 @@ extern BYTE config_ctrl_mouse_wheel_action;
 extern BYTE config_left_click_action;
 extern BYTE config_right_click_action;
 extern BYTE config_xbutton_action;
+extern BYTE config_theme; /* 0 dark, 1 light */
 extern BYTE config_windowed_background_color_r;
 extern BYTE config_windowed_background_color_g;
 extern BYTE config_windowed_background_color_b;

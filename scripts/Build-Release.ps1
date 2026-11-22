@@ -34,6 +34,10 @@ if($LASTEXITCODE -ne 0){throw 'Viewer build failed'}
 $build=Join-Path $root 'build';$payload=Join-Path $build 'payload';$out=Join-Path $root 'release-assets'
 New-Item -ItemType Directory -Force $payload,$out | Out-Null
 Copy-Item (Join-Path $root 'voidImageViewer/vs2019/x64/Release/fyto.exe') $payload
+$commit=& git -C $root rev-parse HEAD
+if($LASTEXITCODE -ne 0){throw 'Build source commit unavailable'}
+$buildInfo=[ordered]@{version=$version;commit=$commit.Trim();viewer_sha256=(Get-FileHash (Join-Path $payload 'fyto.exe')).Hash.ToLowerInvariant()}
+$buildInfo | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $payload 'BUILD_INFO.json') -Encoding utf8
 Copy-Item (Join-Path $root 'LICENSE') $payload
 Copy-Item (Join-Path $root 'voidImageViewer/libwebp/COPYING') (Join-Path $payload 'libwebp-COPYING')
 Copy-Item (Join-Path $root 'voidImageViewer/libwebp/PATENTS') (Join-Path $payload 'libwebp-PATENTS')
