@@ -128,6 +128,18 @@ static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wc
     SetBkMode(dc,TRANSPARENT);
     if(minimal && filename)fyto_hover_text(dc,filename,layout.filename,
         DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX,text_alpha,dpi_y,fyto_caption_font_pixels(dpi_y));
+    if(image_w>0 && image_h>0){
+        wchar_t dimensions[64];
+        wsprintfW(dimensions,L"%d × %d",image_w,image_h);
+        SelectObject(dc,fyto_hover_font);
+        fyto_hover_text(dc,dimensions,layout.resolution,
+            DT_RIGHT|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX,text_alpha,dpi_y,MulDiv(13,dpi_y,96));
+    }
+    if(show_play && !IsRectEmpty(&layout.play)){
+        SelectObject(dc,fyto_hover_font);
+        fyto_hover_text(dc,playing?L"Ⅱ":L"▶",layout.play,
+            DT_CENTER|DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX,text_alpha,dpi_y,MulDiv(24,dpi_y,96));
+    }
     SelectObject(dc,old_font);RestoreDC(dc,saved);
 }
 static void fyto_hover_presentation_destroy(void)

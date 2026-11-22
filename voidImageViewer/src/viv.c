@@ -2692,7 +2692,9 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
         /* A display-size prefetch is only meaningful in the plain fit view;
            when the user has zoomed, the existing frame prefetch (with its mipmap
            chain) is the better guess. */
-        job->display_prefetch = is_preload && config_preload_next && !_viv_is_slideshow &&
+        job->display_prefetch = (is_preload ||
+            (!cached.hbitmap && !(_viv_preview.hbitmap && _viv_same_image(_viv_frame_fd, fd)))) &&
+            !_viv_is_slideshow &&
             !_viv_zoom_pos && !_viv_1to1 && !_viv_explicit_fit &&
             _viv_dst_zoom_x_pos == _VIV_DST_ZOOM_ONE &&
             _viv_dst_zoom_y_pos == _VIV_DST_ZOOM_ONE;
@@ -11885,12 +11887,15 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
 {
     UINT target_wide = 0, target_high = 0, decode_wide, decode_high, denominator = 0;
     UINT wide = 0, high = 0;
+    UINT image_wide = jpeg->wide, image_high = jpeg->high;
+    BOOL transpose = orientation >= 5 && orientation <= 8;
     HBITMAP bitmap, scaled;
     _viv_preview_t preview;
 
-    if (!job->display_prefetch || orientation > 1) return FALSE;
+    if (!job->display_prefetch) return FALSE;
     if (jpeg->icc.state == FYTO_ICC_UNSUPPORTED) return FALSE;
-    if (!_viv_job_display_target(job, (int)jpeg->wide, (int)jpeg->high,
+    if (transpose) { image_wide = jpeg->high; image_high = jpeg->wide; }
+    if (!_viv_job_display_target(job, (int)image_wide, (int)image_high,
         (int *)&target_wide, (int *)&target_high)) return FALSE;
     /* Nothing to downscale: the ordinary preview/full path is just as good. */
     if ((UINT64)target_wide * target_high >= (UINT64)jpeg->wide * jpeg->high) return FALSE;
@@ -11899,8 +11904,8 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
         UINT d;
         for (d = 8; d >= 1; d >>= 1)
         {
-            decode_wide = (jpeg->wide + d - 1) / d;
-            decode_high = (jpeg->high + d - 1) / d;
+            decode_wide = (image_wide + d - 1) / d;
+            decode_high = (image_high + d - 1) / d;
             if (decode_wide >= target_wide && decode_high >= target_high)
             {
                 denominator = d;
@@ -11914,6 +11919,13 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
         jpeg->wide, jpeg->high, denominator, 32, &wide, &high,
         jpeg->cancelled, jpeg->cancel_context);
     if (!bitmap) return FALSE;
+    if (orientation > 1) {
+        HBITMAP oriented = _viv_orientate_hbitmap(bitmap, orientation);
+        DeleteObject(bitmap);
+        bitmap = oriented;
+        if (!bitmap) return FALSE;
+        if (transpose) { UINT swap = wide; wide = high; high = swap; }
+    }
     scaled = bitmap;
     if (wide != target_wide || high != target_high)
     {
@@ -11936,8 +11948,8 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
     preview.hbitmap = scaled;
     preview.wide = target_wide;
     preview.high = target_high;
-    preview.image_wide = jpeg->wide;
-    preview.image_high = jpeg->high;
+    preview.image_wide = image_wide;
+    preview.image_high = image_high;
     /* Full resolution is decoded after the image has been idle for a moment
        (or immediately when the user zooms in), never on the navigation path. */
     preview.defer_detail = TRUE;
@@ -15524,14 +15536,9 @@ static void _viv_do_mousewheel_action(int action,int delta,int x,int y)
 	}
     else if (action == 1 || action == 2)
     {
-        MSG queued;
+        /* Consume only this event. Pulling wheel messages out of the queue
+           reorders them across keys, modifiers and direction changes. */
         _viv_wheel_delta += delta;
-        /* Windows delivers one WM_MOUSEWHEEL per notch, so a quick scroll
-           arrives as a run of messages and the window would decode every
-           image in between. Take the notches that are already queued and move
-           once, to the image the user will actually be looking at. */
-        while (PeekMessageW(&queued, _viv_hwnd, WM_MOUSEWHEEL, WM_MOUSEWHEEL, PM_REMOVE))
-            _viv_wheel_delta += GET_WHEEL_DELTA_WPARAM(queued.wParam);
         if (_viv_wheel_delta > 0)
         {
             int notches = _viv_wheel_delta / WHEEL_DELTA;
@@ -16036,7 +16043,7 @@ static void _viv_replay_directory_navigation(BOOL fresh)
                between. The steps are consumed in order, so the net offset is
                kept - ten presses still move ten images - and a reversal in the
                queue simply walks back. */
-            WIN32_FIND_DATA walk = *_viv_current_fd, hop;
+            WIN32_FIND_DATA walk = _viv_requested_fd, hop;
             BYTE last_step = step;
             int last_prev = prev;
             unsigned moved = 0, i;
@@ -16065,7 +16072,7 @@ static void _viv_replay_directory_navigation(BOOL fresh)
             }
         }
 
-        if (!playlist && !_viv_cached_directory_next(_viv_current_fd, prev,
+        if (!playlist && !_viv_cached_directory_next(&_viv_requested_fd, prev,
             (step & FYTO_NAV_WRAP) != 0, &next, fresh))
         {
             _viv_schedule_directory_scan();
@@ -16095,41 +16102,6 @@ static void _viv_replay_directory_navigation(BOOL fresh)
     }
 }
 
-static void _viv_reverse_wheel_navigation(int prev)
-{
-    BYTE pending = _viv_navigation_in_flight;
-    const wchar_t *shown = _viv_frame_fd->cFileName;
-    const wchar_t *target = _viv_current_fd->cFileName;
-    size_t directory_length;
-    if (!pending && _viv_directory_step_count) pending = _viv_directory_steps[0];
-    if (!(pending & FYTO_NAV_WHEEL) || ((pending & FYTO_NAV_PREVIOUS) != 0) == (prev != 0) ||
-        !*shown) return;
-
-    directory_length = string_get_filename_part(shown) - shown;
-    if (!_viv_playlist_start &&
-        (directory_length != (size_t)(string_get_filename_part(target) - target) ||
-         wcsncmp(shown, target, directory_length))) return;
-
-    _viv_directory_step_count = 0;
-    if (_viv_navigation_in_flight && !_viv_same_image(_viv_frame_fd, &_viv_requested_fd))
-    {
-        // The old selection never appeared. A reversal starts from the image the user sees.
-        _viv_cancel_load(FALSE);
-        if (_viv_load_image_next_fd)
-        {
-            mem_free(_viv_load_image_next_fd);
-            _viv_load_image_next_fd = NULL;
-        }
-        _viv_clear_preload();
-        _viv_load_is_preload = 0;
-        _viv_should_activate_preload_on_load = 0;
-        *_viv_current_fd = *_viv_frame_fd;
-        _viv_requested_fd = *_viv_frame_fd;
-        _viv_status_update();
-    }
-    _viv_navigation_in_flight = 0;
-}
-
 static void _viv_next_manual(int prev, int repeat)
 {
     if (_viv_load_is_preload || _viv_preview.hbitmap) repeat = 0;
@@ -16138,11 +16110,9 @@ static void _viv_next_manual(int prev, int repeat)
         _viv_next(prev, 1, 0, repeat);
         return;
     }
-    if (repeat && (_viv_directory_step_count || _viv_navigation_in_flight ||
-        (_viv_load_image_thread && (_viv_load_frame_count <= 1 || _viv_load_image_terminate))))
-        return;
-
-    if (_viv_wheel_navigation) _viv_reverse_wheel_navigation(prev);
+    /* Selection advances from the requested file, independent of which
+       decode has reached the screen. An opposite notch never erases input. */
+    _viv_navigation_in_flight = 0;
     if (_viv_directory_step_count == ARRAYSIZE(_viv_directory_steps)) return;
     _viv_directory_steps[_viv_directory_step_count++] =
         (prev ? FYTO_NAV_PREVIOUS : 0) | (_viv_wheel_navigation ? FYTO_NAV_WHEEL : FYTO_NAV_WRAP);
@@ -16236,7 +16206,7 @@ static BOOL _viv_mode_window_rect(const RECT *original,const RECT *photo,const R
     int width,height,area_width,area_height,x,y;
     int work_width=work->right-work->left,work_height=work->bottom-work->top;
     int top_chrome=title_height();
-    int bottom_chrome=standard?MulDiv(24,os_logical_high,96):0;
+    int bottom_chrome=config_show_status?MulDiv(24,os_logical_high,96):0;
     int chrome_height=top_chrome+bottom_chrome;
     int sidebar_limit=config_show_exif?MulDiv(340,os_logical_high,96):0;
     int photo_width=photo->right-photo->left,photo_height=photo->bottom-photo->top;
@@ -16309,7 +16279,9 @@ static void _viv_set_view_mode(BOOL standard)
     config_show_menu=standard;
     config_show_caption=standard;
     config_show_thickframe=standard;
-    config_show_status=standard;
+    /* Dimensions belong to the hover overlay; mode changes must not add a
+       second information row and shrink the image again. */
+    config_show_status=0;
     config_show_controls=0;
     refit=refit && _viv_mode_window_rect(&original,&photo,&work,screen_filling,standard,&target);
     if (refit)_viv_fitting_window=1;

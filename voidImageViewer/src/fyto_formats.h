@@ -200,10 +200,10 @@ static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp
         // The one-click route: Windows signs UserChoice, so the only legal
         // silent switch is the system "Default apps" page. Everything below is
         // the per-format fallback.
-        fyto_format_control(hwnd,L"BUTTON",L"一次性设为默认…",WS_TABSTOP|BS_DEFPUSHBUTTON,61202,12,10,190,26);
-        fyto_format_control(hwnd,L"BUTTON",L"全选格式",WS_TABSTOP,61201,210,14,64,18);
-        fyto_format_control(hwnd,L"STATIC",L"一次设好全部图片格式的默认应用。",0,0,12,44,352,14);
-        fyto_format_control(hwnd,L"STATIC",L"也可逐个勾选下列格式，每种需在系统对话框确认一次。",0,0,12,64,352,14);
+        fyto_format_control(hwnd,L"BUTTON",L"打开系统默认应用设置…",WS_TABSTOP|BS_DEFPUSHBUTTON,61202,12,10,190,26);
+        fyto_format_control(hwnd,L"BUTTON",L"刷新状态",WS_TABSTOP,61201,210,14,64,18);
+        fyto_format_control(hwnd,L"STATIC",L"在系统页面中选择 fyto 并确认默认图片格式。",0,0,12,44,352,14);
+        fyto_format_control(hwnd,L"STATIC",L"返回后自动刷新；勾选状态表示当前系统默认应用。",0,0,12,64,352,14);
         for(i=0;i<FYTO_FORMAT_COUNT;i++){
             int x,y;unsigned n=0,k;
             if(!fyto_offered_format(i))continue;
@@ -215,21 +215,23 @@ static INT_PTR CALLBACK fyto_formats_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp
         fyto_format_control(hwnd,L"BUTTON",L"关闭",WS_TABSTOP,IDCANCEL,286,164,80,22);
         return TRUE;
     }
+    if(msg==WM_ACTIVATE && LOWORD(wp)!=WA_INACTIVE){fyto_sync_boxes(hwnd);return TRUE;}
     if(msg==WM_COMMAND){
         int id=LOWORD(wp);
         if(id==61202){
             INT_PTR launched;
+            if(!fyto_register_formats()){
+                MessageBoxW(hwnd,L"未能注册 fyto 的默认应用信息，请检查当前用户的注册表写入权限。",L"fyto",MB_OK|MB_ICONERROR);
+                return TRUE;
+            }
             fyto_write_association_value(L"SetupVersion",1);
-            launched=(INT_PTR)ShellExecuteW(hwnd,L"open",L"ms-settings:defaultapps?registeredAppMachine=fyto",NULL,NULL,SW_SHOWNORMAL);
+            launched=(INT_PTR)ShellExecuteW(hwnd,L"open",L"ms-settings:defaultapps?registeredAppUser=fyto",NULL,NULL,SW_SHOWNORMAL);
             // Some Windows versions do not understand the per-app query; do not
             // leave the user with a closed dialog and no route to the setting.
             if(launched<=32)MessageBoxW(hwnd,L"无法自动打开系统设置。请手动打开「设置 → 应用 → 默认应用 → fyto」。",L"fyto",MB_OK|MB_ICONINFORMATION);
-            EndDialog(hwnd,0);
             return TRUE;
         }
         if(id==61201){
-            for(i=0;i<FYTO_FORMAT_COUNT;i++)
-                if(fyto_offered_format(i) && !fyto_is_default(fyto_extensions[i]))fyto_set_default(hwnd,i);
             fyto_sync_boxes(hwnd);
             return TRUE;
         }
