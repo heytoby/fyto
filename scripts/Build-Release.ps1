@@ -15,6 +15,12 @@ if(!$sdk){throw 'A versioned Windows SDK is required'}
 & (Join-Path $root 'scripts/Build-Jpeg.ps1') -Root $root
 & python (Join-Path $root 'tests/test_playback_contract.py')
 if($LASTEXITCODE -ne 0){throw 'Playback contract check failed'}
+& python (Join-Path $root 'tests/prepare_navigation_test.py')
+if($LASTEXITCODE -ne 0){throw 'Navigation test extraction failed'}
+& $msbuild (Join-Path $root 'tests/navigation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Navigation test build failed'}
+& (Join-Path $root 'build/navigation-tests/test_navigation.exe')
+if($LASTEXITCODE -ne 0){throw 'Navigation input regression'}
 & python (Join-Path $root 'tests/prepare_presentation_test.py')
 if($LASTEXITCODE -ne 0){throw 'Presentation test preparation failed'}
 & $msbuild (Join-Path $root 'tests/presentation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"

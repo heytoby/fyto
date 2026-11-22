@@ -758,7 +758,8 @@ typedef struct _viv_directory_s
 static _viv_directory_t *_viv_directory_scan, *_viv_directory_cache;
 static BOOL _viv_directory_changed(const _viv_directory_t *directory);
 enum { FYTO_NAV_PREVIOUS = 1, FYTO_NAV_WRAP = 2, FYTO_NAV_WHEEL = 4 };
-static BYTE _viv_directory_steps[128];
+static BYTE *_viv_directory_steps;
+static unsigned _viv_directory_step_capacity;
 static unsigned _viv_directory_step_count;
 static BYTE _viv_navigation_in_flight;
 static BOOL _viv_dispatching_navigation;
@@ -16115,7 +16116,14 @@ static void _viv_next_manual(int prev, int repeat)
         (_viv_load_image_thread && (_viv_load_frame_count <= 1 || _viv_load_image_terminate))))
         return;
 
-    if (_viv_directory_step_count == ARRAYSIZE(_viv_directory_steps)) return;
+    if (_viv_directory_step_count == _viv_directory_step_capacity)
+    {
+        unsigned capacity = _viv_directory_step_capacity ? _viv_directory_step_capacity * 2 : 128;
+        BYTE *steps = realloc(_viv_directory_steps, capacity);
+        if (!steps) return;
+        _viv_directory_steps = steps;
+        _viv_directory_step_capacity = capacity;
+    }
     _viv_directory_steps[_viv_directory_step_count++] =
         (prev ? FYTO_NAV_PREVIOUS : 0) | (_viv_wheel_navigation ? FYTO_NAV_WHEEL : FYTO_NAV_WRAP);
     /* Navigate from the cached listing right away. Waiting for the change
