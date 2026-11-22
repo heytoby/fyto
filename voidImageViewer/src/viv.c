@@ -3838,7 +3838,7 @@ static void _viv_paint_empty(HDC dc)
     if(ui_font)DeleteObject(ui_font);
 }
 
-static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
+static LRESULT CALLBACK _viv_proc_inner(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
 if(fyto_hover_input(hwnd,msg,wParam,lParam))return 0;
 if(fyto_window_drag(hwnd,msg,wParam,lParam))return 0;
@@ -6032,6 +6032,20 @@ debug_printf("PAINT %d %d %d\n",_viv_frame_position,rw,rh);
 	
 	return DefWindowProc(hwnd,msg,wParam,lParam);
 }
+#include "audit_trace.h"
+static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
+{
+    LARGE_INTEGER start,end;LRESULT result;
+    BOOL trace=fyto_audit_enabled() && (msg==WM_PAINT || msg==WM_MOUSEWHEEL || msg==WM_KEYDOWN || msg==WM_TIMER || msg==_VIV_WM_REPLY);
+    if(trace)QueryPerformanceCounter(&start);
+    result=_viv_proc_inner(hwnd,msg,wp,lp);
+    if(trace){
+        QueryPerformanceCounter(&end);
+        fyto_audit_record(msg,start,end,_viv_requested_fd.cFileName,_viv_frame_fd?_viv_frame_fd->cFileName:L"");
+    }
+    return result;
+}
+
 
 static int _viv_process_install_command_line_options(wchar_t *cl)
 {
