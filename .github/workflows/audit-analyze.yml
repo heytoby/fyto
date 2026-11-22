@@ -1,0 +1,21 @@
+name: Inspect failed runtime audit evidence
+on:
+  push:
+    branches: ['build/fyto-audit-20261122']
+    paths: ['.github/workflows/audit-analyze.yml', 'tests/analyze_audit.py']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  analyze:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyto-runtime-audit
+          run-id: 45021670856
+          github-token: ${{ github.token }}
+          path: previous-audit
+      - shell: pwsh
+        run: python tests/analyze_audit.py previous-audit
