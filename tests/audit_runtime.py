@@ -14,11 +14,18 @@ source=root/'voidImageViewer/vs2019/x64/Release/fyto.exe'
 viewer=scratch/'fyto.exe';shutil.copy2(source,viewer)
 colors=[(210,30,40),(30,200,50),(40,50,210),(210,180,30),(170,40,190),(30,180,190),(200,100,40),(110,190,50)]
 fixtures=[]
+corner_colors=[(250,70,20),(30,240,90),(70,30,240),(240,210,50)]
+corner_map=[[0,1,2,3],[1,0,3,2],[3,2,1,0],[2,3,0,1],[0,2,1,3],[2,0,3,1],[3,1,2,0],[1,3,0,2]]
 for i,color in enumerate(colors):
     size=(6000,4000) if i%2==0 else (4000,6000)
     image=Image.new('RGB',size,color);draw=ImageDraw.Draw(image)
     for x in range(0,size[0],64):draw.line((x,0,x,size[1]//5),fill=(x%255,70,130),width=8)
-    path=scratch/f'{i:02}.jpg';image.save(path,quality=95,progressive=i%3==0)
+    for quadrant,color2 in enumerate(corner_colors):
+        left=0 if quadrant%2==0 else size[0]*2//3
+        top=0 if quadrant<2 else size[1]*2//3
+        draw.rectangle((left,top,left+size[0]//3,top+size[1]//3),fill=color2)
+    exif=Image.Exif();exif[274]=i+1
+    path=scratch/f'{i:02}.jpg';image.save(path,quality=95,progressive=i%3==0,exif=exif)
     fixtures.append({'name':path.name,'size':size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
 (scratch/'fyto.ini').write_text('[fyto]\nappdata=0\nmultiple_instances=1\ndefaults_version=5\nshow_caption=0\nshow_menu=0\nshow_status=0\nmouse_wheel_action=1\nnav_sort=0\nnav_sort_ascending=1\n',encoding='ascii')
 (scratch/'associations.ini').write_text('[fyto]\nSelectedFormats=15\nSetupVersion=1\n',encoding='ascii')
@@ -61,6 +68,12 @@ def verify_pixel(color):
         value=g.GetPixel(mem,rect.right//2,rect.bottom//2)
         actual=(value&255,(value>>8)&255,(value>>16)&255)
         assert max(abs(a-b) for a,b in zip(actual,color))<=8,(actual,color)
+        image_index=colors.index(color)
+        for corner,(px,py) in enumerate([(0.2,0.2),(0.8,0.2),(0.2,0.8),(0.8,0.8)]):
+            value=g.GetPixel(mem,int(rect.right*px),int(rect.bottom*py))
+            actual=(value&255,(value>>8)&255,(value>>16)&255)
+            expected=corner_colors[corner_map[image_index][corner]]
+            assert max(abs(a-b) for a,b in zip(actual,expected))<=8,('EXIF corner',image_index+1,corner,actual,expected)
     finally:g.SelectObject(mem,old);g.DeleteObject(bitmap);g.DeleteDC(mem);u.ReleaseDC(hwnd,dc)
 def percentile(values,p):return sorted(values)[max(0,math.ceil(len(values)*p)-1)]
 process=subprocess.Popen([str(viewer.resolve()),'/window',str((scratch/'00.jpg').resolve())],cwd=scratch,env=env)
@@ -105,7 +118,7 @@ checks={'complete_1000':len(warm)==1000,'warm_p95_le_33ms':bool(warm) and percen
     'gdi_stable':len(checkpoints)==3 and checkpoints[-1]['gdi']<=checkpoints[0]['gdi']+2,
     'no_private_growth':len(checkpoints)==3 and checkpoints[-1]['private']<=checkpoints[0]['private']+4*1024**2}
 result={'platform':platform.platform(),'exe_sha256':hashlib.sha256(viewer.read_bytes()).hexdigest(),'commit':os.getenv('GITHUB_SHA'),
-    'scope':'CI host; input posting to completed application WM_PAINT; excludes physical scanout; generated 24 MP local JPEGs, no NAS',
+    'scope':'CI host; input posting to completed application WM_PAINT; excludes physical scanout; generated 24 MP local JPEGs with EXIF 1-8 corner verification, no NAS',
     'checkpoints':checkpoints,'display_dimensions':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':fixtures,'failure':failure,'checks':checks,'warm_p95_ms':percentile(warm,.95) if warm else None,
     'ui_p95_ms':percentile(ui,.95) if ui else None,'ui_max_ms':max(ui) if ui else None,
     'private_peak_MiB':max((x['private'] for x in memory),default=0)/1024**2,'samples':samples,'resources':memory}
