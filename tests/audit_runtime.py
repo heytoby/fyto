@@ -32,7 +32,7 @@ k.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];k.OpenProcess.restype=w.HANDLE
 k.CloseHandle.argtypes=[w.HANDLE]
 ps.GetProcessMemoryInfo.argtypes=[w.HANDLE,c.POINTER(Counters),w.DWORD]
 u.GetGuiResources.argtypes=[w.HANDLE,w.DWORD];u.GetGuiResources.restype=w.DWORD
-records=[];samples=[];memory=[];offset=0;tail=b''
+records=[];samples=[];memory=[];checkpoints=[];offset=0;tail=b''
 def read_trace():
     global offset,tail
     if not trace.exists():return
@@ -80,6 +80,15 @@ try:
         verify_pixel(colors[index])
         samples.append({'iteration':i,'index':index,'input_qpc':start,'paint_qpc':end,'ms':(end-start)*1000/freq})
         if i<100:time.sleep(.22)
+        if i in [99,599,1099]:
+            # Compare the same file in the same settled state, rather than a
+            # decoding midpoint against an idle endpoint.
+            while index>0:
+                index-=1;t=int(time.perf_counter()*freq)
+                assert u.PostMessageW(hwnd,0x20A,120<<16,0)
+                await_paint(f'{index:02}.jpg',t);verify_pixel(colors[index])
+            direction=1;time.sleep(1);read_trace();measure()
+            checkpoints.append(dict(memory[-1],iteration=i))
     time.sleep(1);read_trace();measure()
 except BaseException as exc:failure=repr(exc)
 finally:
@@ -93,10 +102,11 @@ ui=[(row[2]-row[1])*1000/freq for row in records if row[1]>=ui_start and row[0] 
 checks={'complete_1000':len(warm)==1000,'warm_p95_le_33ms':bool(warm) and percentile(warm,.95)<=33,
     'ui_p95_le_8ms':bool(ui) and percentile(ui,.95)<=8,'ui_max_le_16ms':bool(ui) and max(ui)<=16,
     'private_peak_le_256MiB':bool(memory) and max(x['private'] for x in memory)<=256*1024**2,
-    'gdi_stable':len(memory)>1 and memory[-1]['gdi']<=memory[len(memory)//2]['gdi']+2}
+    'gdi_stable':len(checkpoints)==3 and checkpoints[-1]['gdi']<=checkpoints[0]['gdi']+2,
+    'no_private_growth':len(checkpoints)==3 and checkpoints[-1]['private']<=checkpoints[0]['private']+4*1024**2}
 result={'platform':platform.platform(),'exe_sha256':hashlib.sha256(viewer.read_bytes()).hexdigest(),'commit':os.getenv('GITHUB_SHA'),
     'scope':'CI host; input posting to completed application WM_PAINT; excludes physical scanout; generated 24 MP local JPEGs, no NAS',
-    'fixtures':fixtures,'failure':failure,'checks':checks,'warm_p95_ms':percentile(warm,.95) if warm else None,
+    'checkpoints':checkpoints,'display_dimensions':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':fixtures,'failure':failure,'checks':checks,'warm_p95_ms':percentile(warm,.95) if warm else None,
     'ui_p95_ms':percentile(ui,.95) if ui else None,'ui_max_ms':max(ui) if ui else None,
     'private_peak_MiB':max((x['private'] for x in memory),default=0)/1024**2,'samples':samples,'resources':memory}
 (out/'results.json').write_text(json.dumps(result,indent=2),encoding='utf8')

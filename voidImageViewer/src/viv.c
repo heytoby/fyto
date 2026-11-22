@@ -740,6 +740,7 @@ static DWORD _viv_jpeg_detail_started;
 static struct {
     WIN32_FIND_DATA file;
     _viv_preview_t image;
+    unsigned used;
 } _viv_recent_previews[8];
 static unsigned _viv_recent_preview_slot;
 typedef struct _viv_directory_s
@@ -2490,6 +2491,7 @@ static void _viv_take_recent_preview(const WIN32_FIND_DATA *file, _viv_preview_t
             if (!copy) return;
             *preview = *slot;
             preview->hbitmap = copy;
+            _viv_recent_previews[i].used = ++_viv_recent_preview_slot;
             return;
         }
     }
@@ -16421,12 +16423,22 @@ debug_printf("activate preload\n");
 
 static void _viv_remember_preview(_viv_preview_t preview)
 {
-    unsigned slot = _viv_recent_preview_slot;
-    _viv_recent_preview_slot = (slot + 1) % ARRAYSIZE(_viv_recent_previews);
+    unsigned i,slot=0,oldest=~0u;
+    /* Retain distinct files. A visit ring evicts useful images merely because
+       the user traverses the same neighbours repeatedly. */
+    for(i=0;i<ARRAYSIZE(_viv_recent_previews);i++){
+        if(_viv_recent_previews[i].image.hbitmap &&
+            !string_compare(_viv_recent_previews[i].file.cFileName,_viv_frame_fd->cFileName)){
+            slot=i;break;
+        }
+        if(!_viv_recent_previews[i].image.hbitmap){slot=i;oldest=0;}
+        else if(oldest && _viv_recent_previews[i].used<oldest){slot=i;oldest=_viv_recent_previews[i].used;}
+    }
     if (_viv_recent_previews[slot].image.hbitmap)
         DeleteObject(_viv_recent_previews[slot].image.hbitmap);
     _viv_recent_previews[slot].image = preview;
     _viv_recent_previews[slot].file = *_viv_frame_fd;
+    _viv_recent_previews[slot].used = ++_viv_recent_preview_slot;
     /* Previews sit on top of the frame caches in the same budget; they are the
        cheapest thing to drop, so trim them (never the frames) when the cap is
        already exceeded. */
