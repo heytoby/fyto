@@ -948,9 +948,6 @@ static _viv_command_t _viv_commands[] =
 
 	{"&View",MF_POPUP,_VIV_MENU_ROOT,_VIV_MENU_VIEW},
 	
-	{"Caption",MF_STRING|MF_OWNERDRAW,_VIV_MENU_VIEW,VIV_ID_VIEW_CAPTION},
-	{"Frame",MF_STRING|MF_OWNERDRAW,_VIV_MENU_VIEW,VIV_ID_VIEW_THICKFRAME},
-	{"&Menu",MF_STRING,_VIV_MENU_VIEW,VIV_ID_VIEW_MENU},
 //	{0,MF_SEPARATOR,_VIV_MENU_VIEW,0},
 	{"&Preset",MF_POPUP,_VIV_MENU_VIEW,_VIV_MENU_VIEW_PRESET},
 	{"&Minimal",MF_STRING,_VIV_MENU_VIEW_PRESET,VIV_ID_VIEW_PRESET_1},
@@ -16211,7 +16208,7 @@ static BOOL _viv_mode_window_rect(const RECT *original,const RECT *photo,const R
     int width,height,area_width,area_height,x,y;
     int work_width=work->right-work->left,work_height=work->bottom-work->top;
     int top_chrome=title_height();
-    int bottom_chrome=standard?MulDiv(24,os_logical_high,96):0;
+    int bottom_chrome=0;
     int chrome_height=top_chrome+bottom_chrome;
     int sidebar_limit=config_show_exif?MulDiv(340,os_logical_high,96):0;
     int photo_width=photo->right-photo->left,photo_height=photo->bottom-photo->top;
@@ -16284,7 +16281,7 @@ static void _viv_set_view_mode(BOOL standard)
     config_show_menu=standard;
     config_show_caption=standard;
     config_show_thickframe=standard;
-    config_show_status=standard;
+    config_show_status=0;
     config_show_controls=0;
     refit=refit && _viv_mode_window_rect(&original,&photo,&work,screen_filling,standard,&target);
     if (refit)_viv_fitting_window=1;

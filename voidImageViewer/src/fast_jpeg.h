@@ -99,8 +99,9 @@ static void fyto_icc_apply_bitmap(const fyto_wic_image *jpeg, HBITMAP bitmap)
     if (GetObject(bitmap, sizeof(dib), &dib) != sizeof(dib) || !dib.bmBits) return;
     if (dib.bmBitsPixel != 24 && dib.bmBitsPixel != 32) return;
     height = dib.bmHeight < 0 ? -dib.bmHeight : dib.bmHeight;
-    fyto_icc_apply((BYTE *)dib.bmBits, (UINT)dib.bmWidth, (UINT)height,
-        (UINT)dib.bmWidthBytes, dib.bmBitsPixel, &jpeg->icc);
+    fyto_icc_apply_cancellable((BYTE *)dib.bmBits, (UINT)dib.bmWidth, (UINT)height,
+        (UINT)dib.bmWidthBytes, dib.bmBitsPixel, &jpeg->icc,
+        jpeg->cancelled, jpeg->cancel_context);
 }
 
 /* Read the profile once and reduce it to a 3x3 matrix plus tone-curve tables. */

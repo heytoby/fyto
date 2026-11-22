@@ -82,9 +82,26 @@ int wmain(int argc, wchar_t **argv)
         fyto_jpeg_set_input(&jpeg, stream, NULL, NULL);
         if (!fyto_jpeg_open(&jpeg, stream, TRUE)) return 4;
         input = jpeg.input_data;
+        {
+            HBITMAP from_memory, from_stream;
+            from_memory=fyto_jpeg_decode_pixels(input,jpeg.input_size,jpeg.wide,jpeg.high,
+                4,32,&w,&h,NULL,NULL);
+            from_stream=fyto_jpeg_decode_input(stream,NULL,0,jpeg.wide,jpeg.high,
+                4,32,&w,&h,NULL,NULL);
+            if (!compare(from_memory,from_stream)) failed=1;
+            if (from_memory) DeleteObject(from_memory);
+            if (from_stream) DeleteObject(from_stream);
+            calls=0;
+            from_stream=fyto_jpeg_decode_input(stream,NULL,0,jpeg.wide,jpeg.high,
+                1,32,&w,&h,cancel_decode,&calls);
+            if (from_stream || calls<6) failed=1;
+            if (from_stream) DeleteObject(from_stream);
+            calls=0;
+        }
         orientation = fyto_jpeg_orientation(&jpeg);
         fast = fyto_jpeg_full(&jpeg, orientation, &w, &h);
         jpeg.input_data = NULL;
+        jpeg.input_stream = NULL;
         reference = fyto_jpeg_full(&jpeg, orientation, &w, &h);
         if (!compare(fast, reference)) failed = 1;
         if (fast) DeleteObject(fast);
@@ -92,6 +109,7 @@ int wmain(int argc, wchar_t **argv)
         jpeg.input_data = input;
         fast = fyto_jpeg_preview(&jpeg, 1024, &w, &h);
         jpeg.input_data = NULL;
+        jpeg.input_stream = NULL;
         reference = fyto_jpeg_preview(&jpeg, 1024, &w, &h);
         {
             WICPixelFormatGUID format;

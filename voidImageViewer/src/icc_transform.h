@@ -296,6 +296,9 @@ typedef struct fyto_icc_job_s
 	UINT wide, high, stride, bpp;
 	UINT y0, y1;
 	const fyto_icc_t *table;
+    BOOL (*cancelled)(void *);
+    void *context;
+    HANDLE completed;
 } fyto_icc_job_t;
 
 static void fyto_icc_rows(const fyto_icc_job_t *job)
@@ -304,7 +307,9 @@ static void fyto_icc_rows(const fyto_icc_job_t *job)
 	UINT x, y;
 	for (y = job->y0; y < job->y1; y++)
 	{
-		BYTE *row = job->pixels + (SIZE_T)y * job->stride;
+		BYTE *row;
+        if (job->cancelled && job->cancelled(job->context)) return;
+        row = job->pixels + (SIZE_T)y * job->stride;
 		if (job->bpp == 32)
 		{
 			for (x = 0; x < job->wide; x++)
@@ -334,12 +339,15 @@ static void fyto_icc_rows(const fyto_icc_job_t *job)
 
 static DWORD WINAPI fyto_icc_thread(void *param)
 {
-	fyto_icc_rows((const fyto_icc_job_t *)param);
+	fyto_icc_job_t *job = param;
+    fyto_icc_rows(job);
+    SetEvent(job->completed);
 	return 0;
 }
 
 /* Convert a BGR/BGRX bitmap in place. */
-static void fyto_icc_apply(BYTE *pixels, UINT wide, UINT high, UINT stride, UINT bpp, const fyto_icc_t *t)
+static void fyto_icc_apply_cancellable(BYTE *pixels, UINT wide, UINT high, UINT stride, UINT bpp,
+    const fyto_icc_t *t, BOOL (*cancelled)(void *), void *context)
 {
 	fyto_icc_job_t jobs[8];
 	HANDLE threads[8];
@@ -352,7 +360,7 @@ static void fyto_icc_apply(BYTE *pixels, UINT wide, UINT high, UINT stride, UINT
 
 	GetSystemInfo(&info);
 	chunks = info.dwNumberOfProcessors ? info.dwNumberOfProcessors : 1;
-	if (chunks > 8) chunks = 8;
+	if (chunks > 4) chunks = 4;
 	threaded = (UINT64)wide * high >= 512 * 1024 && chunks > 1;
 	if (!threaded) chunks = 1;
 	per = (high + chunks - 1) / chunks;
@@ -369,13 +377,22 @@ static void fyto_icc_apply(BYTE *pixels, UINT wide, UINT high, UINT stride, UINT
 		jobs[i].y0 = y0;
 		jobs[i].y1 = y1;
 		jobs[i].table = t;
+        jobs[i].cancelled = cancelled;
+        jobs[i].context = context;
+        jobs[i].completed = NULL;
 		threads[i] = NULL;
 	}
 
 	for (i = 0; i < chunks; i++)
 	{
 		if (jobs[i].y1 <= jobs[i].y0) continue;
-		threads[i] = CreateThread(NULL, 0, fyto_icc_thread, &jobs[i], 0, NULL);
+        threads[i] = CreateEventW(NULL, TRUE, FALSE, NULL);
+        jobs[i].completed = threads[i];
+        if (threads[i] && !QueueUserWorkItem(fyto_icc_thread, &jobs[i], WT_EXECUTEDEFAULT))
+        {
+            CloseHandle(threads[i]);
+            threads[i] = NULL;
+        }
 		if (!threads[i])
 		{
 			fyto_icc_rows(&jobs[i]); /* thread refused: do this slice inline */
@@ -393,4 +410,8 @@ static void fyto_icc_apply(BYTE *pixels, UINT wide, UINT high, UINT stride, UINT
 	}
 }
 
+static void fyto_icc_apply(BYTE *pixels, UINT wide, UINT high, UINT stride, UINT bpp, const fyto_icc_t *t)
+{
+    fyto_icc_apply_cancellable(pixels, wide, high, stride, bpp, t, NULL, NULL);
+}
 #endif

@@ -49,6 +49,7 @@ static int _config_load_flag(ini_t *ini,const utf8_t *key,int default_value,BYTE
 }
 
 static int config_defaults_version = 0;
+static int config_saved_view_mode = -1;
 // Set when the loaded ini actually carried the key. Display defaults are applied
 // only for keys no ini set, so a value the user (or installed-defaults.ini)
 // wrote is never replaced behind their back.
@@ -130,6 +131,7 @@ static void _config_load_settings_by_location(const wchar_t *path,int is_root)
 	if (ini)
 	{
         config_defaults_version = ini_get_int(ini,(const utf8_t *)"defaults_version",config_defaults_version);
+        config_saved_view_mode = ini_get_int(ini,(const utf8_t *)"view_mode",config_saved_view_mode);
 		config_show_exif = !!_config_load_flag(ini,(const utf8_t *)"show_exif",config_show_exif,&_config_has_show_exif);
 		config_middle_click_action = ini_get_int(ini,(const utf8_t *)"middle_click_action",config_middle_click_action) == 1;
 		config_language = ini_get_int(ini,(const utf8_t *)"language",config_language) == 1 ? 1 : 0;
@@ -302,6 +304,10 @@ void config_load_settings(void)
     if (!_config_has_show_status) config_show_status=config_show_caption || config_show_menu;
     if (!_config_has_show_controls) config_show_controls=0;
     if (!_config_has_show_exif) config_show_exif=0;
+    if (config_saved_view_mode < 0 || config_saved_view_mode > 1)
+        config_saved_view_mode = config_show_caption || config_show_menu;
+    config_show_caption = config_show_menu = config_show_thickframe = (BYTE)config_saved_view_mode;
+    config_show_status = config_show_controls = 0;
 }
 
 
@@ -356,6 +362,7 @@ static void _config_save_settings_by_location(const wchar_t *path,int is_root)
 		else
 		{
             _config_write_int(h,"defaults_version",config_defaults_version);
+            _config_write_int(h,"view_mode",config_show_caption || config_show_menu);
 			_config_write_int(h,"show_exif",config_show_exif);
 			_config_write_int(h,"middle_click_action",config_middle_click_action);
 			_config_write_int(h,"language",config_language);

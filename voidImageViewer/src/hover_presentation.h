@@ -33,7 +33,7 @@ static int fyto_hover_shadow_radius(int dpi_y)
     return max(2,MulDiv(3,dpi_y,96));
 }
 
-static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE alpha,int dpi_y,int font_pixels)
+static void fyto_hover_render_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE alpha,int dpi_y,int font_pixels)
 {
     int radius=fyto_hover_shadow_radius(dpi_y), span=2*radius+1;
     int width=r.right-r.left+2*radius, height=r.bottom-r.top+2*radius;
@@ -111,6 +111,77 @@ static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,BYTE al
     DeleteObject(bitmap);
     DeleteDC(layer);
 }
+typedef struct fyto_hover_text_cache_s
+{
+    HBITMAP bitmap;
+    wchar_t text[32768];
+    int wide, high, pixels, dpi;
+    UINT flags;
+} fyto_hover_text_cache_t;
+
+static fyto_hover_text_cache_t fyto_hover_text_cache[2];
+static unsigned fyto_hover_text_slot;
+
+static void fyto_hover_text(HDC dc,const wchar_t *text,RECT r,UINT flags,
+    BYTE alpha,int dpi_y,int font_pixels)
+{
+    int radius = fyto_hover_shadow_radius(dpi_y);
+    int wide = r.right-r.left+2*radius, high = r.bottom-r.top+2*radius;
+    fyto_hover_text_cache_t *entry = NULL;
+    HDC layer;
+    HGDIOBJ old;
+    unsigned i;
+    BLENDFUNCTION blend = {AC_SRC_OVER,0,alpha,AC_SRC_ALPHA};
+    if (!alpha || !text || IsRectEmpty(&r) || wcslen(text)>=32768) return;
+    for (i=0;i<ARRAYSIZE(fyto_hover_text_cache);i++)
+    {
+        fyto_hover_text_cache_t *candidate=&fyto_hover_text_cache[i];
+        if (candidate->bitmap && candidate->wide==wide && candidate->high==high &&
+            candidate->pixels==font_pixels && candidate->dpi==dpi_y &&
+            candidate->flags==flags && !wcscmp(candidate->text,text))
+        {
+            entry=candidate;
+            break;
+        }
+    }
+    if (!entry)
+    {
+        BITMAPINFO info={0};
+        DWORD *bits=NULL;
+        RECT local={radius,radius,wide-radius,high-radius};
+        entry=&fyto_hover_text_cache[fyto_hover_text_slot++%ARRAYSIZE(fyto_hover_text_cache)];
+        if (entry->bitmap) DeleteObject(entry->bitmap);
+        entry->bitmap=NULL;
+        info.bmiHeader.biSize=sizeof(info.bmiHeader);
+        info.bmiHeader.biWidth=wide;
+        info.bmiHeader.biHeight=-high;
+        info.bmiHeader.biPlanes=1;
+        info.bmiHeader.biBitCount=32;
+        layer=CreateCompatibleDC(dc);
+        if (!layer) return;
+        entry->bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,(void **)&bits,NULL,0);
+        if (!entry->bitmap) { DeleteDC(layer); return; }
+        old=SelectObject(layer,entry->bitmap);
+        ZeroMemory(bits,(SIZE_T)wide*high*4);
+        fyto_hover_render_text(layer,text,local,flags,255,dpi_y,font_pixels);
+        GdiFlush();
+        SelectObject(layer,old);
+        DeleteDC(layer);
+        lstrcpyW(entry->text,text);
+        entry->wide=wide;
+        entry->high=high;
+        entry->pixels=font_pixels;
+        entry->dpi=dpi_y;
+        entry->flags=flags;
+    }
+    layer=CreateCompatibleDC(dc);
+    if (!layer) return;
+    old=SelectObject(layer,entry->bitmap);
+    AlphaBlend(dc,r.left-radius,r.top-radius,wide,high,layer,0,0,wide,high,blend);
+    SelectObject(layer,old);
+    DeleteDC(layer);
+}
+
 static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wchar_t *filename,
     int image_w,int image_h,int minimal,int playing,BYTE text_alpha,int show_play,int dpi_x,int dpi_y)
 {
@@ -152,6 +223,12 @@ static void fyto_draw_hover(HDC dc,const RECT *image,const RECT *canvas,const wc
 }
 static void fyto_hover_presentation_destroy(void)
 {
+    unsigned i;
+    for (i=0;i<ARRAYSIZE(fyto_hover_text_cache);i++)
+    {
+        if (fyto_hover_text_cache[i].bitmap) DeleteObject(fyto_hover_text_cache[i].bitmap);
+        ZeroMemory(&fyto_hover_text_cache[i],sizeof(fyto_hover_text_cache[i]));
+    }
     if(fyto_hover_font){DeleteObject(fyto_hover_font);fyto_hover_font=NULL;}
     if(fyto_hover_caption_font){DeleteObject(fyto_hover_caption_font);fyto_hover_caption_font=NULL;}
 }
