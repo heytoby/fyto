@@ -97,16 +97,22 @@ static void fyto_wic_close(fyto_wic_image *jpeg)
     if (jpeg->factory) IWICImagingFactory_Release(jpeg->factory);
 }
 
-static void fyto_icc_apply_bitmap(const fyto_wic_image *jpeg, HBITMAP bitmap)
+static BOOL fyto_icc_apply_bitmap(const fyto_wic_image *jpeg,HBITMAP bitmap)
 {
-    BITMAP dib;
-    INT height;
-    if (!bitmap || jpeg->icc.state != FYTO_ICC_MATRIX) return;
-    if (GetObject(bitmap, sizeof(dib), &dib) != sizeof(dib) || !dib.bmBits) return;
-    if (dib.bmBitsPixel != 24 && dib.bmBitsPixel != 32) return;
-    height = dib.bmHeight < 0 ? -dib.bmHeight : dib.bmHeight;
-    fyto_icc_apply((BYTE *)dib.bmBits, (UINT)dib.bmWidth, (UINT)height,
-        (UINT)dib.bmWidthBytes, dib.bmBitsPixel, &jpeg->icc);
+    BITMAP dib;INT height;
+    if(!bitmap)return FALSE;
+    if(jpeg->icc.state!=FYTO_ICC_MATRIX)return TRUE;
+    if(GetObject(bitmap,sizeof(dib),&dib)!=sizeof(dib) || !dib.bmBits ||
+        (dib.bmBitsPixel!=24 && dib.bmBitsPixel!=32))return FALSE;
+    height=dib.bmHeight<0?-dib.bmHeight:dib.bmHeight;
+#ifdef FYTO_HAVE_TURBO_JPEG
+    return fyto_icc_apply_cancellable((BYTE *)dib.bmBits,(UINT)dib.bmWidth,(UINT)height,
+        (UINT)dib.bmWidthBytes,dib.bmBitsPixel,&jpeg->icc,jpeg->cancelled,jpeg->cancel_context);
+#else
+    fyto_icc_apply((BYTE *)dib.bmBits,(UINT)dib.bmWidth,(UINT)height,
+        (UINT)dib.bmWidthBytes,dib.bmBitsPixel,&jpeg->icc);
+    return TRUE;
+#endif
 }
 
 /* Read the profile once and reduce it to a 3x3 matrix plus tone-curve tables. */
@@ -232,7 +238,7 @@ static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT 
             jpeg->cancelled, jpeg->cancel_context);
         if (bitmap)
         {
-            fyto_icc_apply_bitmap(jpeg, bitmap);
+            if(!fyto_icc_apply_bitmap(jpeg,bitmap)){DeleteObject(bitmap);return NULL;}
             if(transform!=WICBitmapTransformRotate0){
                 HBITMAP oriented=fyto_orient_display_bitmap(bitmap,orientation,
                     jpeg->cancelled,jpeg->cancel_context);
@@ -322,8 +328,9 @@ static HBITMAP fyto_jpeg_preview(const fyto_wic_image *jpeg, UINT edge, UINT *wi
         bitmap = fyto_jpeg_decode_image(jpeg,
             jpeg->wide, jpeg->high, denominator, 24, wide, high,
             jpeg->cancelled, jpeg->cancel_context);
-        if (bitmap && jpeg->icc.state == FYTO_ICC_MATRIX)
-            fyto_icc_apply_bitmap(jpeg, bitmap);
+        if(bitmap && jpeg->icc.state==FYTO_ICC_MATRIX && !fyto_icc_apply_bitmap(jpeg,bitmap)){
+            DeleteObject(bitmap);bitmap=NULL;
+        }
         else if (bitmap && jpeg->profile && jpeg->icc.state == FYTO_ICC_UNSUPPORTED)
         {
             BITMAP dib;

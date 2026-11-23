@@ -21,6 +21,10 @@ if($LASTEXITCODE -ne 0){throw 'Association identity regression failed'}
 if($LASTEXITCODE -ne 0){throw 'File stream test build failed'}
 & (Join-Path $root 'build/file-stream-tests/test_file_stream.exe')
 if($LASTEXITCODE -ne 0){throw 'File stream regression failed'}
+& $msbuild (Join-Path $root 'tests/icc_cancel.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'ICC cancellation test build failed'}
+& (Join-Path $root 'build/icc-cancel-tests/test_icc_cancel.exe')
+if($LASTEXITCODE -ne 0){throw 'ICC cancellation regression failed'}
 & python (Join-Path $root 'tests/test_playback_contract.py')
 if($LASTEXITCODE -ne 0){throw 'Playback contract check failed'}
 & python (Join-Path $root 'tests/prepare_navigation_test.py')
@@ -53,6 +57,11 @@ if($LASTEXITCODE -ne 0){throw 'Primary display regression check failed'}
 if($LASTEXITCODE -ne 0){throw 'JPEG test build failed'}
 & python (Join-Path $root 'tests/verify_jpeg_decode.py') (Join-Path $root 'build/jpeg-tests/test_jpeg_decode.exe')
 if($LASTEXITCODE -ne 0){throw 'JPEG decoding regression'}
+& $msbuild (Join-Path $root 'tests/icc_profile.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
+if($LASTEXITCODE -ne 0){throw 'ICC profile test build failed'}
+& python (Join-Path $root 'tests/verify_icc_profiles.py') (Join-Path $root 'build/icc-profile-tests/test_icc.exe')
+if($LASTEXITCODE -ne 0){throw 'ICC profile pixel regression failed'}
+
 & $msbuild (Join-Path $root 'voidImageViewer/vs2019/voidImageViewer.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
 if($LASTEXITCODE -ne 0){throw 'Viewer build failed'}
 & python (Join-Path $root 'tests/test_fyto_order.py') (Join-Path $root 'voidImageViewer/vs2019/x64/Release/fyto.exe')

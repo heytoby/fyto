@@ -296,21 +296,27 @@ typedef struct fyto_icc_job_s
 	UINT wide, high, stride, bpp;
 	UINT y0, y1;
 	const fyto_icc_t *table;
+	BOOL (*cancelled)(void *);
+	void *context;
+	HANDLE done;
+	BOOL ok;
 } fyto_icc_job_t;
 
-static void fyto_icc_rows(const fyto_icc_job_t *job)
+static BOOL fyto_icc_rows(const fyto_icc_job_t *job)
 {
 	const fyto_icc_t *t = job->table;
 	UINT x, y;
 	for (y = job->y0; y < job->y1; y++)
 	{
 		BYTE *row = job->pixels + (SIZE_T)y * job->stride;
+		if(job->cancelled && job->cancelled(job->context))return FALSE;
 		if (job->bpp == 32)
 		{
 			for (x = 0; x < job->wide; x++)
 			{
 				BYTE *p = row + (SIZE_T)x * 4;
 				int out[3];
+				if(!(x&4095) && job->cancelled && job->cancelled(job->context))return FALSE;
 				fyto_icc_map(t, p[2], p[1], p[0], out);
 				p[0] = (BYTE)out[2];
 				p[1] = (BYTE)out[1];
@@ -323,6 +329,7 @@ static void fyto_icc_rows(const fyto_icc_job_t *job)
 			{
 				BYTE *p = row + (SIZE_T)x * 3;
 				int out[3];
+				if(!(x&4095) && job->cancelled && job->cancelled(job->context))return FALSE;
 				fyto_icc_map(t, p[2], p[1], p[0], out);
 				p[0] = (BYTE)out[2];
 				p[1] = (BYTE)out[1];
@@ -330,67 +337,53 @@ static void fyto_icc_rows(const fyto_icc_job_t *job)
 			}
 		}
 	}
+	return !(job->cancelled && job->cancelled(job->context));
 }
 
 static DWORD WINAPI fyto_icc_thread(void *param)
 {
-	fyto_icc_rows((const fyto_icc_job_t *)param);
-	return 0;
+    fyto_icc_job_t *job=param;
+    job->ok=fyto_icc_rows(job);
+    SetEvent(job->done);
+    return 0;
 }
 
-/* Convert a BGR/BGRX bitmap in place. */
-static void fyto_icc_apply(BYTE *pixels, UINT wide, UINT high, UINT stride, UINT bpp, const fyto_icc_t *t)
+/* Bounded work submissions reuse the Windows worker pool. Cancelled slices
+   always complete before their caller releases the bitmap or conversion table. */
+static BOOL fyto_icc_apply_cancellable(BYTE *pixels,UINT wide,UINT high,UINT stride,UINT bpp,
+    const fyto_icc_t *t,BOOL (*cancelled)(void *),void *context)
 {
-	fyto_icc_job_t jobs[8];
-	HANDLE threads[8];
-	SYSTEM_INFO info;
-	UINT chunks, i, per;
-	BOOL threaded;
-
-	if (!pixels || !wide || !high || (bpp != 24 && bpp != 32)) return;
-	if (t->state != FYTO_ICC_MATRIX) return;
-
-	GetSystemInfo(&info);
-	chunks = info.dwNumberOfProcessors ? info.dwNumberOfProcessors : 1;
-	if (chunks > 8) chunks = 8;
-	threaded = (UINT64)wide * high >= 512 * 1024 && chunks > 1;
-	if (!threaded) chunks = 1;
-	per = (high + chunks - 1) / chunks;
-
-	for (i = 0; i < chunks; i++)
-	{
-		UINT y0 = i * per;
-		UINT y1 = y0 + per > high ? high : y0 + per;
-		jobs[i].pixels = pixels;
-		jobs[i].wide = wide;
-		jobs[i].high = high;
-		jobs[i].stride = stride;
-		jobs[i].bpp = bpp;
-		jobs[i].y0 = y0;
-		jobs[i].y1 = y1;
-		jobs[i].table = t;
-		threads[i] = NULL;
-	}
-
-	for (i = 0; i < chunks; i++)
-	{
-		if (jobs[i].y1 <= jobs[i].y0) continue;
-		threads[i] = CreateThread(NULL, 0, fyto_icc_thread, &jobs[i], 0, NULL);
-		if (!threads[i])
-		{
-			fyto_icc_rows(&jobs[i]); /* thread refused: do this slice inline */
-			jobs[i].y1 = jobs[i].y0;
-		}
-	}
-
-	for (i = 0; i < chunks; i++)
-	{
-		if (threads[i])
-		{
-			WaitForSingleObject(threads[i], INFINITE);
-			CloseHandle(threads[i]);
-		}
-	}
+    fyto_icc_job_t jobs[4];SYSTEM_INFO info;UINT chunks,i,per;BOOL ok=TRUE;
+    if(!pixels || !t || !wide || !high || (bpp!=24 && bpp!=32) || (UINT64)wide*(bpp/8)>stride)return FALSE;
+    if(cancelled && cancelled(context))return FALSE;
+    if(t->state!=FYTO_ICC_MATRIX)return TRUE;
+    GetSystemInfo(&info);chunks=info.dwNumberOfProcessors?info.dwNumberOfProcessors:1;
+    if(chunks>4)chunks=4;
+    if((UINT64)wide*high<512*1024)chunks=1;
+    per=(high+chunks-1)/chunks;
+    ZeroMemory(jobs,sizeof(jobs));
+    for(i=0;i<chunks;i++){
+        fyto_icc_job_t *job=&jobs[i];
+        job->pixels=pixels;job->wide=wide;job->high=high;job->stride=stride;job->bpp=bpp;
+        job->y0=i*per;job->y1=min(high,job->y0+per);job->table=t;
+        job->cancelled=cancelled;job->context=context;job->ok=TRUE;
+        if(job->y0>=job->y1)continue;
+        if(chunks==1){job->ok=fyto_icc_rows(job);continue;}
+        job->done=CreateEventW(NULL,FALSE,FALSE,NULL);
+        if(!job->done || !QueueUserWorkItem(fyto_icc_thread,job,WT_EXECUTEDEFAULT)){
+            if(job->done)CloseHandle(job->done);
+            job->done=NULL;job->ok=fyto_icc_rows(job);
+        }
+    }
+    for(i=0;i<chunks;i++){
+        if(jobs[i].done){WaitForSingleObject(jobs[i].done,INFINITE);CloseHandle(jobs[i].done);}
+        if(!jobs[i].ok)ok=FALSE;
+    }
+    return ok && !(cancelled && cancelled(context));
 }
-
+static void fyto_icc_apply(BYTE *pixels,UINT wide,UINT high,UINT stride,UINT bpp,const fyto_icc_t *t)
+{
+    fyto_icc_apply_cancellable(pixels,wide,high,stride,bpp,t,NULL,NULL);
+}
 #endif
+

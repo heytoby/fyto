@@ -3,6 +3,9 @@ from pathlib import Path
 import os,sys,time,subprocess,shutil,json,traceback,hashlib,ctypes as c,ctypes.wintypes as w
 from PIL import Image,ImageDraw,ImageCms,ImageOps
 from window_test_helpers import u,g,wins,label,capture
+from process_resources import process_resources
+import random,msvcrt
+from io import BytesIO
 if os.getenv('GITHUB_ACTIONS')!='true':
     raise SystemExit('Requires an isolated GitHub Actions runner')
 root=Path(__file__).resolve().parents[1]
@@ -76,9 +79,51 @@ save('icon.ico',base.resize((256,256)),sizes=[(16,16),(32,32),(64,64),(256,256)]
 save('alpha.ico',alpha.resize((256,256)),sizes=[(32,32),(256,256)])
 for mp,size in [(12,(4000,3000)),(24,(6000,4000)),(48,(8000,6000))]:
     save(str(mp)+'mp.jpg',patterned(size),quality=95,progressive=True)
+large=patterned((6000,4000))
+save('24mp-rgb.png',large)
+large_alpha=large.convert('RGBA');large_alpha.putalpha(128);save('24mp-alpha.png',large_alpha)
+save('24mp-rgb.tiff',large,compression='tiff_lzw')
+save('24mp-gray.tiff',large.convert('L'),compression='raw')
+save('24mp-cmyk.jpg',large.convert('CMYK'),quality=95)
+for profile in sorted((root/'tests/icc-profiles').glob('*.icc')):
+    save('24mp-'+profile.stem+'.jpg',large,quality=95,icc_profile=profile.read_bytes())
+noisy=Image.frombytes('RGB',large.size,random.Random(71).randbytes(6000*4000*3));draw=ImageDraw.Draw(noisy)
+for px,py in [(.25,.25),(.75,.25),(.25,.75),(.75,.75)]:
+    x,y=int(6000*px),int(4000*py);draw.rectangle((x-256,y-256,x+256,y+256),fill=large.getpixel((x,y)))
+draw.rectangle((2744,1744,3256,2256),fill=(170,90,160))
+save('24mp-noise.png',noisy)
+del noisy,draw,large_alpha,large
+padded_dir=out/'padded-input';padded_dir.mkdir()
+padded=padded_dir/'padded-input.jpg'
+shutil.copy2(next(p for p in fixtures if p.name=='24mp.jpg'),padded)
+kernel=c.WinDLL('kernel32',use_last_error=True)
+kernel.DeviceIoControl.argtypes=[w.HANDLE,w.DWORD,c.c_void_p,w.DWORD,c.c_void_p,w.DWORD,c.POINTER(w.DWORD),c.c_void_p]
+with padded.open('r+b') as f:
+    returned=w.DWORD()
+    assert kernel.DeviceIoControl(msvcrt.get_osfhandle(f.fileno()),0x900c4,None,0,None,0,c.byref(returned),None),'sparse fixture setup failed'
+    f.truncate(320*1024**2)
+fixtures.append(padded)
+def file_hash(path):
+    digest=hashlib.sha256()
+    with path.open('rb') as f:
+        for chunk in iter(lambda:f.read(1024*1024),b''):digest.update(chunk)
+    return digest.hexdigest()
+def budget(p,pixels):
+    info=process_resources(p.pid);info['budget_applied']=pixels<=24000000
+    if info['budget_applied']:assert info['private_commit_peak_MiB']<=256,info
+    return info
+
 def format_case(path):
     p,h=launch(path);reference=ImageOps.exif_transpose(Image.open(path))
     reference_engine='Pillow decoded pixels'
+    embedded=reference.info.get('icc_profile')
+    if embedded and reference.mode in ['RGB','RGBA']:
+        flags=ImageCms.Flags.NOOPTIMIZE if hasattr(ImageCms,'Flags') else ImageCms.FLAGS['NOTPRECALC']
+        alpha_channel=reference.getchannel('A') if reference.mode=='RGBA' else None
+        reference=ImageCms.profileToProfile(reference.convert('RGB'),ImageCms.ImageCmsProfile(BytesIO(embedded)),
+            ImageCms.createProfile('sRGB'),renderingIntent=1,outputMode='RGB',flags=flags)
+        if alpha_channel is not None:reference.putalpha(alpha_channel)
+        reference_engine='LittleCMS relative-colorimetric reference'
     if reference.mode=='RGBA':
         # Transparency is deliberately shown on a 16 px gray checkerboard.
         bg=Image.new('RGBA',reference.size,(240,240,240,255));draw=ImageDraw.Draw(bg)
@@ -129,8 +174,10 @@ try {
         expected=reference.getpixel((int(rw*px),int(rh*py)))
         assert near(actual,expected,14),(path.name,actual,expected,im.size)
         comparisons.append([list(actual),list(expected)])
+    resources=budget(p,rw*rh)
     close(p,h)
-    return {'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'reference_size':[rw,rh],'window_client':[cw,ch],'pixels':comparisons,'reference_engine':reference_engine}
+    return {'sha256':file_hash(path),'file_bytes':path.stat().st_size,'reference_size':[rw,rh],'window_client':[cw,ch],
+            'pixels':comparisons,'reference_engine':reference_engine,'resources':resources}
 for path in fixtures:check('format:'+path.name,lambda path=path:format_case(path))
 def animation(ext):
     folder=out/('animated-'+ext);folder.mkdir()
@@ -178,6 +225,21 @@ def directory_case(count):
     except AssertionError:raise AssertionError({'actual_title':label(h),'expected':'00001a.png','entries':count})
     close(p,h);return {'entries':count,'end_home_and_remove_add':True}
 for count in [10,1000,10000]:check('directory:'+str(count),lambda count=count:directory_case(count))
+def mixed_large_navigation():
+    folder=out/'mixed-large';folder.mkdir()
+    choices=['24mp-noise.png','24mp-rgb.png','24mp-rgb.tiff']
+    colors=[(170,90,160),(210,190,40),(210,190,40)];targets=[]
+    for i,name in enumerate(choices):
+        source=next(p for p in fixtures if p.name==name)
+        target=folder/(str(i).zfill(2)+source.suffix);os.link(source,target);targets.append(target)
+    p,h=launch(targets[0]);await_color(h,colors[0]);resources=[budget(p,24000000)]
+    for iteration in range(18):
+        index=(iteration+1)%len(targets);command(h,'VIV_ID_NAV_NEXT')
+        wait(lambda:label(h)==targets[index].name,30);await_color(h,colors[index])
+        resources.append(budget(p,24000000))
+    close(p,h);return {'transitions':18,'resources':resources}
+check('mixed-24mp-memory',mixed_large_navigation)
+
 report={'commit':os.getenv('GITHUB_SHA'),'scope':'Disposable CI desktop. Generated fixtures and application pixels, not full release acceptance.','results':results}
 (out/'results.json').write_text(json.dumps(report,indent=2),encoding='utf8')
 print(json.dumps({'passed':sum(x['pass'] for x in results),'total':len(results),'failures':[x['name'] for x in results if not x['pass']]},indent=2))

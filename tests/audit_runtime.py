@@ -51,7 +51,7 @@ def read_trace():
         if len(fields)==5:records.append([int(fields[0]),int(fields[1]),int(fields[2]),fields[3],fields[4]])
 def measure():
     m=Counters();m.cb=c.sizeof(m);assert ps.GetProcessMemoryInfo(handle,c.byref(m),m.cb)
-    memory.append({'t':time.perf_counter(),'private':m.private,'gdi':u.GetGuiResources(handle,0),'user':u.GetGuiResources(handle,1)})
+    memory.append({'t':time.perf_counter(),'private':m.private,'native_commit_peak':m.peak_pagefile,'gdi':u.GetGuiResources(handle,0),'user':u.GetGuiResources(handle,1)})
 def await_paint(name,start):
     deadline=time.monotonic()+10
     while time.monotonic()<deadline:
@@ -121,8 +121,6 @@ try:
     wait(lambda:any(name=='fyto' for _,name in wins(process.pid)))
     hwnd=next(h for h,name in wins(process.pid) if name=='fyto')
     await_paint('00.jpg',0);verify_pixel(colors[0])
-    startup_resources=list(memory);memory.clear()
-    verify_original_copy();copy_resources=list(memory);memory[:]=startup_resources
     time.sleep(.5)
     index=0;direction=1
     for i in range(1100):
@@ -144,6 +142,10 @@ try:
             direction=1;time.sleep(1);read_trace();measure()
             checkpoints.append(dict(memory[-1],iteration=i))
     time.sleep(1);read_trace();measure()
+    ordinary_resources=list(memory);memory.clear()
+    try:verify_original_copy()
+    finally:
+        copy_resources=list(memory);memory[:]=ordinary_resources
 except BaseException as exc:failure=repr(exc)
 finally:
     if hwnd:u.PostMessageW(hwnd,0x10,0,0)
@@ -155,14 +157,16 @@ ui_start=samples[100]['input_qpc'] if len(samples)>100 else 0
 ui=[(row[2]-row[1])*1000/freq for row in records if row[1]>=ui_start and row[0] in [15,0x20A,0x100]]
 checks={'copy_original_ready':copy_verified,'complete_1000':len(warm)==1000,'warm_p95_le_33ms':bool(warm) and percentile(warm,.95)<=33,
     'ui_p95_le_8ms':bool(ui) and percentile(ui,.95)<=8,'ui_max_le_16ms':bool(ui) and max(ui)<=16,
-    'private_peak_le_256MiB':bool(memory) and max(x['private'] for x in memory)<=256*1024**2,
+    'private_peak_le_256MiB':bool(memory) and max(x['native_commit_peak'] for x in memory)<=256*1024**2,
     'gdi_stable':len(checkpoints)==3 and checkpoints[-1]['gdi']<=checkpoints[0]['gdi']+2,
     'no_private_growth':len(checkpoints)==3 and checkpoints[-1]['private']<=checkpoints[0]['private']+4*1024**2}
 result={'platform':platform.platform(),'exe_sha256':hashlib.sha256(viewer.read_bytes()).hexdigest(),'commit':os.getenv('GITHUB_SHA'),
     'scope':'CI host; input posting to completed application WM_PAINT; excludes physical scanout; generated 24 MP local JPEGs with EXIF 1-8 corner verification, no NAS',
     'copy_operation_peak_MiB':max((x['private'] for x in copy_resources),default=0)/1024**2,'checkpoints':checkpoints,'display_dimensions':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':fixtures,'failure':failure,'checks':checks,'warm_p95_ms':percentile(warm,.95) if warm else None,
     'ui_p95_ms':percentile(ui,.95) if ui else None,'ui_max_ms':max(ui) if ui else None,
-    'private_peak_MiB':max((x['private'] for x in memory),default=0)/1024**2,'samples':samples,'resources':memory}
+    'private_peak_MiB':max((x['native_commit_peak'] for x in memory),default=0)/1024**2,
+    'private_sample_peak_MiB':max((x['private'] for x in memory),default=0)/1024**2,
+    'memory_peak_method':'Windows PeakPagefileUsage; ordinary phase precedes original-copy phase','samples':samples,'resources':memory}
 (out/'results.json').write_text(json.dumps(result,indent=2),encoding='utf8')
 print(json.dumps({k:v for k,v in result.items() if k not in ['samples','resources','fixtures']},indent=2),flush=True)
 if failure or not all(checks.values()):raise SystemExit(1)

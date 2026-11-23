@@ -44,6 +44,7 @@ jobs:
           name: fyto-runtime-audit
           path: |
             build/audit-runtime/*
+            build/icc-profile-audit/results.json
             build/extended-audit/results.json
             build/extended-audit/*-render.png
           if-no-files-found: warn

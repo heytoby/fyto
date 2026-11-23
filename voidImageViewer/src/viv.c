@@ -12041,7 +12041,7 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
         }
         DeleteObject(bitmap);
     }
-    fyto_icc_apply_bitmap(jpeg, scaled);
+    if(!fyto_icc_apply_bitmap(jpeg,scaled)){DeleteObject(scaled);return FALSE;}
     if (_viv_load_stop_state(job) == _VIV_LOAD_DISCARD)
     {
         DeleteObject(scaled);

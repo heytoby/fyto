@@ -2,6 +2,10 @@
  * Used to validate the ICC matrix/TRC conversion against lcms. */
 #include <windows.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <limits.h>
+#include <math.h>
 #include "../voidImageViewer/src/fast_jpeg.h"
 
 static BYTE *read_file(const char *path, DWORD *size)
