@@ -72,16 +72,55 @@ save('static.gif',base);save('rgb.tiff',base,compression='tiff_lzw')
 save('gray.tiff',base.convert('L'),compression='raw')
 save('cmyk.jpg',base.convert('CMYK'),quality=95);save('gray.jpg',base.convert('L'),quality=95)
 save('srgb.jpg',base,quality=95,icc_profile=ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes())
-save('icon.ico',base.resize((256,256)),sizes=[(256,256)])
+save('icon.ico',base.resize((256,256)),sizes=[(16,16),(32,32),(64,64),(256,256)])
+save('alpha.ico',alpha.resize((256,256)),sizes=[(32,32),(256,256)])
 for mp,size in [(12,(4000,3000)),(24,(6000,4000)),(48,(8000,6000))]:
     save(str(mp)+'mp.jpg',patterned(size),quality=95,progressive=True)
 def format_case(path):
     p,h=launch(path);reference=ImageOps.exif_transpose(Image.open(path))
+    reference_engine='Pillow decoded pixels'
     if reference.mode=='RGBA':
-        bg=Image.new('RGBA',reference.size,(0,0,0,255));bg.alpha_composite(reference);reference=bg.convert('RGB')
+        # Transparency is deliberately shown on a 16 px gray checkerboard.
+        bg=Image.new('RGBA',reference.size,(240,240,240,255));draw=ImageDraw.Draw(bg)
+        for y in range(0,bg.height,16):
+            for x in range(0,bg.width,16):
+                if ((x//16)^(y//16))&1:draw.rectangle((x,y,x+15,y+15),fill=(216,216,216,255))
+        bg.alpha_composite(reference);reference=bg.convert('RGB')
+    elif reference.mode=='CMYK':
+        # Unprofiled CMYK has no unique sRGB interpretation. Independently
+        # compare the fallback against Windows GDI+'s color-managed decoding,
+        # rather than imposing Pillow's device-independent arithmetic mapping.
+        ps_script="""
+Add-Type -AssemblyName System.Drawing
+$bmp=[System.Drawing.Bitmap]::new($env:FYTO_REFERENCE_FILE,$true)
+try {
+    $colors=@()
+    foreach($point in @(@(0.25,0.25),@(0.75,0.25),@(0.25,0.75),@(0.75,0.75))) {
+        $pixel=$bmp.GetPixel([int]($bmp.Width*$point[0]),[int]($bmp.Height*$point[1]))
+        $colors+=,@([int]$pixel.R,[int]$pixel.G,[int]$pixel.B)
+    }
+    ConvertTo-Json -Compress -InputObject $colors
+} finally {$bmp.Dispose()}
+"""
+        native=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',ps_script],
+            env=dict(os.environ,FYTO_REFERENCE_FILE=str(path.resolve())),capture_output=True,text=True,check=True,timeout=20)
+        samples=json.loads(native.stdout.strip());reference=Image.new('RGB',reference.size)
+        draw=ImageDraw.Draw(reference);rw,rh=reference.size
+        for i,color in enumerate(samples):
+            x=(i%2)*rw//2;y=(i//2)*rh//2
+            draw.rectangle((x,y,x+rw//2-1,y+rh//2-1),fill=tuple(color))
+        reference_engine='Windows GDI+ color-managed CMYK reference'
     else:reference=reference.convert('RGB')
-    # Check a painted pixel before capturing; a title change alone is insufficient.
-    wait(lambda:not near(center(h),(0,0,0),2));time.sleep(.15)
+    # Wait for a known reference pixel; a title or non-black background is insufficient.
+    def reference_ready():
+        r=w.RECT();assert u.GetClientRect(h,c.byref(r))
+        rw,rh=reference.size;scale=min(r.right/rw,r.bottom/rh)
+        x=int((r.right-rw*scale)/2+rw*scale*.25)
+        y=int((r.bottom-rh*scale)/2+rh*scale*.25)
+        dc=u.GetDC(h);value=g.GetPixel(dc,x,y);u.ReleaseDC(h,dc)
+        actual=(value&255,(value>>8)&255,(value>>16)&255)
+        return near(actual,reference.getpixel((rw//4,rh//4)),14)
+    wait(reference_ready);time.sleep(.05)
     im=capture(h,out/(path.name+'-render.png'));cw,ch=im.size
     rw,rh=reference.size;scale=min(cw/rw,ch/rh);dw,dh=rw*scale,rh*scale
     comparisons=[]
@@ -91,7 +130,7 @@ def format_case(path):
         assert near(actual,expected,14),(path.name,actual,expected,im.size)
         comparisons.append([list(actual),list(expected)])
     close(p,h)
-    return {'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'reference_size':[rw,rh],'window_client':[cw,ch],'pixels':comparisons}
+    return {'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'reference_size':[rw,rh],'window_client':[cw,ch],'pixels':comparisons,'reference_engine':reference_engine}
 for path in fixtures:check('format:'+path.name,lambda path=path:format_case(path))
 def animation(ext):
     folder=out/('animated-'+ext);folder.mkdir()
@@ -119,7 +158,9 @@ def overwritten(preserve_metadata=False):
     os.replace(replacement,a)
     # The watcher must discard prior directory and rendered-image snapshots.
     time.sleep(.2);command(h,'VIV_ID_NAV_PREV');wait(lambda:label(h)==a.name)
-    await_color(h,(40,210,70));close(p,h);return {'same_size':a.stat().st_size==before.st_size,'same_mtime':a.stat().st_mtime_ns==before.st_mtime_ns}
+    try:await_color(h,(40,210,70))
+    except AssertionError:raise AssertionError({'title':label(h),'actual_center':center(h),'expected':[40,210,70]})
+    close(p,h);return {'same_size':a.stat().st_size==before.st_size,'same_mtime':a.stat().st_mtime_ns==before.st_mtime_ns}
 check('overwrite:normal',overwritten)
 check('overwrite:same-size-time-replaced-file',lambda:overwritten(True))
 def directory_case(count):
@@ -132,7 +173,9 @@ def directory_case(count):
     command(h,'VIV_ID_NAV_END');wait(lambda:label(h)==str(count-1).zfill(5)+'.png',30)
     command(h,'VIV_ID_NAV_HOME');wait(lambda:label(h)=='00000.png',30)
     (folder/'00001.png').unlink();new=folder/'00001a.png';new.write_bytes(payload)
-    time.sleep(.2);command(h,'VIV_ID_NAV_NEXT');wait(lambda:label(h)=='00001a.png',30)
+    time.sleep(.2);command(h,'VIV_ID_NAV_NEXT')
+    try:wait(lambda:label(h)=='00001a.png',30)
+    except AssertionError:raise AssertionError({'actual_title':label(h),'expected':'00001a.png','entries':count})
     close(p,h);return {'entries':count,'end_home_and_remove_add':True}
 for count in [10,1000,10000]:check('directory:'+str(count),lambda count=count:directory_case(count))
 report={'commit':os.getenv('GITHUB_SHA'),'scope':'Disposable CI desktop. Generated fixtures and application pixels, not full release acceptance.','results':results}

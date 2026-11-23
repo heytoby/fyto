@@ -98,7 +98,7 @@ static HBITMAP fyto_png_wuffs(IStream *stream, DWORD size, BOOL alpha,
 }
 #endif
 
-static HBITMAP fyto_png_full(IStream *stream, BOOL alpha, BOOL icm, UINT *wide, UINT *high)
+static HBITMAP fyto_wic_static_full(IStream *stream, const CLSID *codec, BOOL alpha, BOOL icm, UINT *wide, UINT *high)
 {
     fyto_wic_image png = {0};
     IWICBitmapSource *source;
@@ -109,8 +109,25 @@ static HBITMAP fyto_png_full(IStream *stream, BOOL alpha, BOOL icm, UINT *wide, 
     HBITMAP bitmap = NULL;
     BYTE *pixels;
 
-    if (!fyto_wic_open(&png, &CLSID_WICPngDecoder, stream, &native_format) ||
-        (icm && !fyto_wic_set_color(&png))) goto done;
+    if (!fyto_wic_open(&png, codec, stream, &native_format)) goto done;
+    if (IsEqualGUID(codec,&CLSID_WICIcoDecoder))
+    {
+        UINT count=0,i;
+        if(FAILED(IWICBitmapDecoder_GetFrameCount(png.decoder,&count)) || count>1024)goto done;
+        for(i=1;i<count;i++){
+            IWICBitmapFrameDecode *candidate=NULL;UINT width=0,height=0;
+            if(SUCCEEDED(IWICBitmapDecoder_GetFrame(png.decoder,i,&candidate))){
+                if(SUCCEEDED(IWICBitmapFrameDecode_GetSize(candidate,&width,&height)) &&
+                    (UINT64)width*height>(UINT64)png.wide*png.high){
+                    IWICBitmapFrameDecode_Release(png.frame);png.frame=candidate;
+                    candidate=NULL;png.wide=width;png.high=height;
+                }
+                if(candidate)IWICBitmapFrameDecode_Release(candidate);
+            }
+        }
+        if(FAILED(IWICBitmapFrameDecode_GetPixelFormat(png.frame,&native_format)))goto done;
+    }
+    if(icm && !fyto_wic_set_color(&png))goto done;
     source = (IWICBitmapSource *)png.frame;
     if (png.profile)
     {
@@ -145,4 +162,13 @@ done:
     return bitmap;
 }
 
+
+static HBITMAP fyto_png_full(IStream *stream,BOOL alpha,BOOL icm,UINT *wide,UINT *high)
+{
+    return fyto_wic_static_full(stream,&CLSID_WICPngDecoder,alpha,icm,wide,high);
+}
+static HBITMAP fyto_icon_full(IStream *stream,BOOL icm,UINT *wide,UINT *high)
+{
+    return fyto_wic_static_full(stream,&CLSID_WICIcoDecoder,TRUE,icm,wide,high);
+}
 #endif

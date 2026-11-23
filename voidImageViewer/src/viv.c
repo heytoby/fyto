@@ -3957,6 +3957,18 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
                     _viv_free_directory(scan);
                 else
                 {
+                    /* Size and last-write time do not identify replaced files:
+                       editors can preserve both. A signalled directory watcher
+                       invalidates every rendered/preloaded copy before replaying
+                       navigation against the new snapshot. Keep the visible
+                       current frame until the new target has been decoded. */
+                    if (_viv_directory_cache && _viv_directory_changed(_viv_directory_cache))
+                    {
+                        _viv_clear_loading_preload();
+                        _viv_clear_preload();
+                        _viv_clear_last();
+                        _viv_render_cache_clear();
+                    }
                     _viv_free_directory(_viv_directory_cache);
                     _viv_directory_cache = scan;
                     if (!scan->ready)
@@ -12315,6 +12327,15 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
             if (first_frame.frame.hbitmap)
                 ret = _viv_reply_still_frame(job, &first_frame);
         }
+        if (!ret && (_viv_load_stop_state(job) != _VIV_LOAD_DISCARD) &&
+            !lstrcmpiW(PathFindExtensionW(job->filename),L".ico"))
+        {
+            LARGE_INTEGER start={0};
+            stream->lpVtbl->Seek(stream,start,STREAM_SEEK_SET,NULL);
+            first_frame.frame.hbitmap=fyto_icon_full(stream,job->use_icm,
+                &first_frame.wide,&first_frame.high);
+            if(first_frame.frame.hbitmap)ret=_viv_reply_still_frame(job,&first_frame);
+        }
         if (!ret && (_viv_load_stop_state(job) != _VIV_LOAD_DISCARD))
         {
             void *image = NULL;
@@ -15903,7 +15924,7 @@ static BOOL _viv_cached_directory_next(const WIN32_FIND_DATA *current, int prev,
     if (!directory || !directory->ready || !*current->cFileName) return FALSE;
     string_get_path_part(folder, current->cFileName);
     if (string_compare(folder, directory->folder) != 0) return FALSE;
-    if (!fresh && _viv_directory_changed(directory))
+    if (_viv_directory_changed(directory))
     {
         // A rescan supplies fresh size and write times before any cached image is reused.
         return FALSE;

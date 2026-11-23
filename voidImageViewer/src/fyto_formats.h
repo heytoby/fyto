@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include "association_path.h"
 // Defined in titlebar.h, which is included after this header.
 #include "format_samples.h"
 
@@ -44,8 +45,11 @@ static BOOL fyto_write_association_value(const wchar_t *name,DWORD value)
 }
 static int fyto_is_default(const wchar_t *ext)
 {
-    wchar_t exe[STRING_SIZE];DWORD len=STRING_SIZE;
-    return SUCCEEDED(AssocQueryStringW(ASSOCF_NONE,ASSOCSTR_EXECUTABLE,ext,L"open",exe,&len)) && lstrcmpiW(PathFindFileNameW(exe),L"fyto.exe")==0;
+    wchar_t exe[STRING_SIZE],current[STRING_SIZE];DWORD len=STRING_SIZE;
+    DWORD own_length=GetModuleFileNameW(NULL,current,ARRAYSIZE(current));
+    return own_length && own_length<ARRAYSIZE(current) &&
+        SUCCEEDED(AssocQueryStringW(ASSOCF_NONE,ASSOCSTR_EXECUTABLE,ext,L"open",exe,&len)) &&
+        fyto_same_executable_file(exe,current);
 }
 static BOOL fyto_reg_string(const wchar_t *key,const wchar_t *name,const wchar_t *value)
 {

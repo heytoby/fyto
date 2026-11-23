@@ -13,6 +13,10 @@ $sdkRoot=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
 $sdk=(Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
 if(!$sdk){throw 'A versioned Windows SDK is required'}
 & (Join-Path $root 'scripts/Build-Jpeg.ps1') -Root $root
+& $msbuild (Join-Path $root 'tests/association_path.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Association identity test build failed'}
+& (Join-Path $root 'build/association-tests/test_association_path.exe')
+if($LASTEXITCODE -ne 0){throw 'Association identity regression failed'}
 & python (Join-Path $root 'tests/test_playback_contract.py')
 if($LASTEXITCODE -ne 0){throw 'Playback contract check failed'}
 & python (Join-Path $root 'tests/prepare_navigation_test.py')
