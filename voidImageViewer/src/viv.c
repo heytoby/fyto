@@ -2480,6 +2480,19 @@ static BOOL _viv_same_image(const WIN32_FIND_DATA *a, const WIN32_FIND_DATA *b)
         string_compare(a->cFileName, b->cFileName) == 0;
 }
 
+static BOOL _viv_defer_detail_upgrade(const WIN32_FIND_DATA *fd,_viv_preview_t *cached)
+{
+    if(!_viv_retired_load || _viv_active_load || !_viv_preview.hbitmap ||
+        !_viv_same_image(_viv_frame_fd,fd))return FALSE;
+    /* This return does not present cached: release the copied bitmap here. */
+    if(cached->hbitmap){DeleteObject(cached->hbitmap);cached->hbitmap=NULL;}
+    _viv_load_image_next_fd=mem_alloc(sizeof(WIN32_FIND_DATA));
+    *_viv_load_image_next_fd=*fd;
+    _viv_load_image_next_is_preload=0;
+    _viv_status_update();
+    return TRUE;
+}
+
 static void _viv_take_recent_preview(const WIN32_FIND_DATA *file, _viv_preview_t *preview)
 {
     unsigned i;
@@ -2669,17 +2682,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
         _viv_active_load = NULL;
     }
 
-    /* A cancelled codec retains its allocations until it exits. Serialize
-       full-resolution upgrades behind that lifetime; selected display-size
-       loads can still start immediately while an old job retires. */
-    if(!is_preload && _viv_retired_load && !_viv_active_load &&
-        _viv_preview.hbitmap && _viv_same_image(_viv_frame_fd,fd)){
-        _viv_load_image_next_fd=mem_alloc(sizeof(WIN32_FIND_DATA));
-        *_viv_load_image_next_fd=*fd;
-        _viv_load_image_next_is_preload=0;
-        _viv_status_update();
-        return;
-    }
+    if(!is_preload && _viv_defer_detail_upgrade(fd,&cached))return;
 	if (_viv_active_load)
 	{
 		// already loading a different image.

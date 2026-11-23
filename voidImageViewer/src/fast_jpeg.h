@@ -11,6 +11,7 @@
 #endif
 #include <wincodec.h>
 #include "icc_transform.h"
+#include "bitmap_orientation.h"
 
 typedef struct fyto_wic_image {
     IWICImagingFactory *factory;
@@ -208,7 +209,7 @@ static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT 
     /* Decode RGB/gray images directly into the final DIB. An ICC profile no
        longer forces the WIC path: matrix/TRC profiles are converted here and
        sRGB-equivalent ones cost nothing. Only exotic profiles use WIC. */
-    if (jpeg->icc.state != FYTO_ICC_UNSUPPORTED && transform == WICBitmapTransformRotate0)
+    if (jpeg->icc.state != FYTO_ICC_UNSUPPORTED)
     {
         bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
             jpeg->wide, jpeg->high, 1, 32, wide, high,
@@ -216,6 +217,12 @@ static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT 
         if (bitmap)
         {
             fyto_icc_apply_bitmap(jpeg, bitmap);
+            if(transform!=WICBitmapTransformRotate0){
+                HBITMAP oriented=fyto_orient_display_bitmap(bitmap,orientation,
+                    jpeg->cancelled,jpeg->cancel_context);
+                DeleteObject(bitmap);bitmap=oriented;
+                if(bitmap && orientation>=5 && orientation<=8){UINT swap=*wide;*wide=*high;*high=swap;}
+            }
             return bitmap;
         }
         if (fyto_jpeg_cancelled(jpeg)) return NULL;

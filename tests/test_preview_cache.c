@@ -2,6 +2,8 @@
 #include <windows.h>
 #include <wchar.h>
 #include <stdio.h>
+#include <stdlib.h>
+#define mem_alloc malloc
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -16,6 +18,11 @@ static BOOL _viv_same_image(const WIN32_FIND_DATA *a,const WIN32_FIND_DATA *b){r
 static HBITMAP _viv_copy_bitmap(HBITMAP bitmap,int w,int h){return CreateBitmap(w,h,1,32,NULL);}
 static unsigned long long _viv_cache_footprint(void){return 0;}
 static BOOL _viv_cache_evict_one(BOOL frames){assert(0);return FALSE;}
+static void *_viv_retired_load,*_viv_active_load;
+static _viv_preview_t _viv_preview;
+static WIN32_FIND_DATA *_viv_load_image_next_fd;
+static int _viv_load_image_next_is_preload;
+static void _viv_status_update(void){}
 #include "../build/cache-under-test.h"
 int main(void){
     int i,n;DWORD before=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS);
@@ -32,6 +39,14 @@ int main(void){
         }
     }
     for(i=0;i<8;i++)DeleteObject(_viv_recent_previews[i].image.hbitmap);
+    _viv_preview.hbitmap=CreateBitmap(1,1,1,32,NULL);assert(_viv_preview.hbitmap);
+    _viv_retired_load=(void *)1;
+    for(i=0;i<1000;i++){
+        _viv_preview_t cached={CreateBitmap(1,1,1,32,NULL),1,1};assert(cached.hbitmap);
+        assert(_viv_defer_detail_upgrade(&file,&cached));assert(!cached.hbitmap);
+        assert(_viv_load_image_next_fd);free(_viv_load_image_next_fd);_viv_load_image_next_fd=NULL;
+    }
+    DeleteObject(_viv_preview.hbitmap);_viv_preview.hbitmap=NULL;
     assert(GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS)==before);
     puts("8 distinct images retained across 1000 duplicate visits; 8000 hits; stable GDI handles");return 0;
 }
