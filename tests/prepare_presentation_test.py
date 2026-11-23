@@ -8,7 +8,7 @@ generated.write_text("\n\n".join(body(source,name) for name in ["_viv_remember_m
 (root/"build/render-under-test.h").write_text("\n\n".join(body(source,name) for name in ["_viv_display_fit_box","_viv_render_size_in_area","_viv_get_render_size"])+"\n",encoding="utf8")
 bitmap_source=(root/"voidImageViewer/src/fast_jpeg.h").read_text(encoding="utf-8-sig")
 mipmap_functions=[body(bitmap_source,"fyto_image_dib")]
-mipmap_functions += [body(source,name) for name in ("_viv_average_pixels","_viv_sum_pixel_pairs","_viv_half_dib")]
+mipmap_functions += [body(source,name) for name in ("_viv_average_pixels","_viv_sum_pixel_pairs","_viv_half_dib","_viv_box_scale")]
 (root/"build/mipmap-under-test.h").write_text("\n\n".join(mipmap_functions)+"\n",encoding="utf8")
 assert "_viv_pending_open_fullscreen" not in source
 assert "_viv_toggle_fullscreen" not in body(source,"_viv_start_first_frame")

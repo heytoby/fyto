@@ -1887,13 +1887,12 @@ static void _viv_render_cache_clear(void)
 // in the middle of a scroll; averaging the source box is several times faster
 // and does not dither, so the picture the user sees does not change.
 static BOOL _viv_box_scale(HBITMAP source, int src_wide, int src_high,
-    HBITMAP dest, int dst_wide, int dst_high)
+    HBITMAP dest, int dst_wide, int dst_high, BOOL s_topdown)
 {
     DIBSECTION s, d;
     const BYTE *sp;
     BYTE *dp;
     int y, sbpp, sstride, dstride, s_high;
-    BOOL s_topdown;
     int *map_x = NULL, *map_y = NULL;
     UINT inv_table[65];
     BOOL ok = FALSE;
@@ -1935,7 +1934,8 @@ static BOOL _viv_box_scale(HBITMAP source, int src_wide, int src_high,
     sstride = s.dsBm.bmWidthBytes;
     dstride = d.dsBm.bmWidthBytes;
     s_high = s.dsBm.bmHeight;
-    s_topdown = s.dsBmih.biHeight < 0;
+    /* GetObject normalizes DIB height; row order belongs to the owner. */
+    GdiFlush();
     sp = (const BYTE *)s.dsBm.bmBits;
     dp = (BYTE *)d.dsBm.bmBits;
 
@@ -2029,7 +2029,10 @@ static BOOL _viv_render_paint(HDC dst, HDC src, int mip_wide, int mip_high,
                 /* Averaging is faster than GDI's dithered stretch and keeps the
                    UI responsive while the user scrolls. */
                 ok = _viv_box_scale((HBITMAP)GetCurrentObject(src, OBJ_BITMAP),
-                    mip_wide, mip_high, slot->hbitmap, wide, high);
+                    mip_wide, mip_high, slot->hbitmap, wide, high,
+                    !_viv_frames || !_viv_frame_count ||
+                    (HBITMAP)GetCurrentObject(src,OBJ_BITMAP)!=_viv_frames[_viv_frame_position].hbitmap ||
+                    _viv_frames[_viv_frame_position].top_down);
                 if (!ok)
                 {
                     previous_mode = SetStretchBltMode(mem_dc, HALFTONE);
@@ -2592,6 +2595,24 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 	if ((!is_preload) && (*_viv_preload_fd->cFileName) && _viv_same_image(_viv_preload_fd, fd) &&
 		(_viv_load_is_preload || _viv_preload_preview.hbitmap || _viv_preload_frames))
 	{
+        /* A running speculative decode must not hide an existing rendered
+           copy of this target. Progressive JPEG prefetches otherwise make a
+           warm cache hit wait for the codec on every pass. */
+        if(config_cache_last && !_viv_is_slideshow){
+            _viv_take_recent_preview(fd,&cached);
+            if(!cached.hbitmap)_viv_render_restore(fd,&cached);
+            if(cached.hbitmap){
+                _viv_cancel_load(FALSE);
+                _viv_clear_preload();
+                _viv_load_is_preload=0;
+                _viv_should_activate_preload_on_load=0;
+                *_viv_current_fd=*fd;
+                cached.defer_detail=TRUE;
+                _viv_show_preview(&cached,fd);
+                _viv_preload_next();
+                return;
+            }
+        }
 		if (_viv_open_preload()) return;
 	}
 	else
@@ -11873,7 +11894,7 @@ static BOOL _viv_reply_display_frame(_viv_load_job_t *job, HBITMAP *bitmap, int 
     if (!_viv_job_display_target(job, wide, high, &target_wide, &target_high)) return FALSE;
     if (target_wide >= wide && target_high >= high) return FALSE;
     reduced = fyto_image_dib(target_wide, target_high, 32, NULL);
-    if (!reduced || !_viv_box_scale(*bitmap, wide, high, reduced, target_wide, target_high))
+    if (!reduced || !_viv_box_scale(*bitmap, wide, high, reduced, target_wide, target_high, TRUE))
     {
         if (reduced) DeleteObject(reduced);
         return FALSE;
@@ -11950,7 +11971,7 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
     {
         scaled = fyto_image_dib(target_wide, target_high, 32, NULL);
         if (!scaled ||
-            !_viv_box_scale(bitmap, (int)wide, (int)high, scaled, (int)target_wide, (int)target_high))
+            !_viv_box_scale(bitmap, (int)wide, (int)high, scaled, (int)target_wide, (int)target_high, TRUE))
         {
             if (scaled) DeleteObject(scaled);
             DeleteObject(bitmap);
