@@ -27,12 +27,14 @@ jobs:
           python -m pip install --disable-pip-version-check --quiet pillow
           if ($LASTEXITCODE) { throw 'Pillow is required for image regression tests' }
       - name: Build and verify the Windows installer
+        id: build
         shell: pwsh
         run: ./scripts/Build-Release.ps1
       - name: Audit actual paint latency and 1000 image transitions
         shell: pwsh
         run: python tests/audit_runtime.py
       - name: Check native formats, animation, replaced files and large directories
+        if: ${{ !cancelled() && steps.build.conclusion == 'success' }}
         shell: pwsh
         run: python tests/audit_extended.py
       - name: Preserve raw audit evidence even on failure

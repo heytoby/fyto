@@ -16002,13 +16002,6 @@ static DWORD WINAPI _viv_scan_directory(void *arg)
     wchar_t pattern[STRING_SIZE];
     size_t capacity = 0;
 
-    if (!InterlockedCompareExchange(&scan->cancelled, 0, 0))
-    {
-        scan->changes = FindFirstChangeNotificationW(scan->folder, FALSE,
-            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE |
-            FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION);
-    }
-
     string_copy(pattern, scan->folder);
     string_cat_utf8(pattern, (const utf8_t *)"\\*.*");
     search = INVALID_HANDLE_VALUE;
@@ -16118,7 +16111,12 @@ static void _viv_schedule_directory_scan(void)
     string_copy(scan->origin.cFileName, string_get_filename_part(current->cFileName));
     scan->origin.dwReserved0 = scan->origin.dwReserved1 = 0;
     string_copy(scan->folder, folder);
-    scan->changes = INVALID_HANDLE_VALUE;
+    /* A watch initiated by the short-lived scan thread becomes signalled
+       when that thread exits, even without a file change. Initiate it on the
+       application's long-lived thread; the snapshot continues to own/close it. */
+    scan->changes = FindFirstChangeNotificationW(scan->folder, FALSE,
+        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE |
+        FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION);
     scan->thread = CreateThread(NULL, 0, _viv_scan_directory, scan, 0, NULL);
     if (!scan->thread)
     {
