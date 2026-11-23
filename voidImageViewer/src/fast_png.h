@@ -175,8 +175,58 @@ static HBITMAP fyto_png_full(IStream *stream,BOOL alpha,BOOL icm,UINT *wide,UINT
 {
     return fyto_wic_static_full(stream,&CLSID_WICPngDecoder,alpha,icm,wide,high);
 }
+/* Some ICOs contain 24-bit PNG frames that the Windows ICO codec rejects.
+   Decode those PNG payloads directly, with bounds checked before every read. */
+static HBITMAP fyto_icon_png_full(IStream *stream,BOOL icm,UINT *wide,UINT *high)
+{
+    HGLOBAL storage=NULL,copy=NULL;BYTE *data=NULL,*dest=NULL;SIZE_T size;
+    UINT count,i,best_offset=0,best_size=0;UINT64 best_area=0;
+    IStream *embedded=NULL;HBITMAP bitmap=NULL;
+    if(FAILED(GetHGlobalFromStream(stream,&storage)))return NULL;
+    size=GlobalSize(storage);data=GlobalLock(storage);
+    if(!data || size<6)goto done;
+    if(data[0] || data[1] || data[2]!=1 || data[3])goto done;
+    count=(UINT)data[4]|((UINT)data[5]<<8);
+    if(!count || count>1024 || count>(size-6)/16)goto done;
+    for(i=0;i<count;i++){
+        const BYTE *entry=data+6+(SIZE_T)i*16;
+        UINT bytes=(UINT)entry[8]|((UINT)entry[9]<<8)|((UINT)entry[10]<<16)|((UINT)entry[11]<<24);
+        UINT offset=(UINT)entry[12]|((UINT)entry[13]<<8)|((UINT)entry[14]<<16)|((UINT)entry[15]<<24);
+        UINT width,height;UINT64 area;
+        if(offset>size || bytes>size-offset || bytes<33 ||
+            memcmp(data+offset,"\211PNG\r\n\032\n",8) ||
+            memcmp(data+offset+12,"IHDR",4))continue;
+        width=fyto_png_u32(data+offset+16);height=fyto_png_u32(data+offset+20);
+        if(!width || !height || width>256 || height>256)continue;
+        area=(UINT64)width*height;
+        if(area>best_area){best_area=area;best_offset=offset;best_size=bytes;}
+    }
+    if(!best_size)goto done;
+    copy=GlobalAlloc(GMEM_MOVEABLE,best_size);if(!copy)goto done;
+    dest=GlobalLock(copy);if(!dest)goto done;
+    CopyMemory(dest,data+best_offset,best_size);GlobalUnlock(copy);
+    if(FAILED(CreateStreamOnHGlobal(copy,TRUE,&embedded)))goto done;
+    copy=NULL;
+    bitmap=fyto_wic_static_full(embedded,&CLSID_WICPngDecoder,TRUE,icm,wide,high);
+done:
+    if(embedded)embedded->lpVtbl->Release(embedded);
+    if(copy)GlobalFree(copy);
+    if(data)GlobalUnlock(storage);
+    return bitmap;
+}
+
 static HBITMAP fyto_icon_full(IStream *stream,BOOL icm,UINT *wide,UINT *high)
 {
-    return fyto_wic_static_full(stream,&CLSID_WICIcoDecoder,TRUE,icm,wide,high);
+    UINT pw=0,ph=0,ww=0,wh=0;
+    HBITMAP png=fyto_icon_png_full(stream,icm,&pw,&ph),wic;
+    LARGE_INTEGER start={0};
+    stream->lpVtbl->Seek(stream,start,STREAM_SEEK_SET,NULL);
+    wic=fyto_wic_static_full(stream,&CLSID_WICIcoDecoder,TRUE,icm,&ww,&wh);
+    if(png && (!wic || (UINT64)pw*ph>=(UINT64)ww*wh)){
+        if(wic)DeleteObject(wic);*wide=pw;*high=ph;return png;
+    }
+    if(png)DeleteObject(png);
+    if(wic){*wide=ww;*high=wh;}
+    return wic;
 }
 #endif
