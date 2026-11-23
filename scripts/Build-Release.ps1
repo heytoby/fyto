@@ -17,6 +17,10 @@ if(!$sdk){throw 'A versioned Windows SDK is required'}
 if($LASTEXITCODE -ne 0){throw 'Association identity test build failed'}
 & (Join-Path $root 'build/association-tests/test_association_path.exe')
 if($LASTEXITCODE -ne 0){throw 'Association identity regression failed'}
+& $msbuild (Join-Path $root 'tests/file_stream.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'File stream test build failed'}
+& (Join-Path $root 'build/file-stream-tests/test_file_stream.exe')
+if($LASTEXITCODE -ne 0){throw 'File stream regression failed'}
 & python (Join-Path $root 'tests/test_playback_contract.py')
 if($LASTEXITCODE -ne 0){throw 'Playback contract check failed'}
 & python (Join-Path $root 'tests/prepare_navigation_test.py')

@@ -262,6 +262,7 @@ static COLORREF _viv_exif_background(void);
 #include "fast_jpeg.h"
 #include "bitmap_orientation.h"
 #include "jpeg_stream.h"
+#include "file_stream.h"
 #if defined(_M_X64) || defined(__x86_64__)
 #include <emmintrin.h>
 #endif
@@ -12016,7 +12017,7 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
     }
     if (!denominator) return FALSE;
 
-    bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
+    bitmap = fyto_jpeg_decode_image(jpeg,
         jpeg->wide, jpeg->high, denominator, 32, &wide, &high,
         jpeg->cancelled, jpeg->cancel_context);
     if (!bitmap) return FALSE;
@@ -12183,18 +12184,28 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 	
 	debug_printf("%s %S...\n",job->prefetch ? "PRELOAD" : "LOAD",job->filename);
 	
+	if(!_viv_load_discarded(job))
 	{
 		HANDLE h;
 		
 		h = CreateFile(job->filename,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|((os_major_version >= 5) ? FILE_SHARE_DELETE : 0),0,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,0);
 		if (h != INVALID_HANDLE_VALUE)
 		{
-			DWORD size;
-			HANDLE global_handle;
-
-			size = GetFileSize(h,0);
+            DWORD size,high=0,peeked=0;BYTE signature[3];LARGE_INTEGER zero={0};
+            HANDLE global_handle;
+            BOOL rewind_ok;
+            if(ReadFile(h,signature,sizeof(signature),&peeked,NULL) && peeked==3 &&
+                signature[0]==0xff && signature[1]==0xd8 && signature[2]==0xff){
+                jpeg_file=TRUE;
+                stream=fyto_file_stream_take(h,_viv_load_discarded,job);
+                if(stream)h=INVALID_HANDLE_VALUE;
+            }
+            rewind_ok=h!=INVALID_HANDLE_VALUE && SetFilePointerEx(h,zero,NULL,FILE_BEGIN);
+            if(!jpeg_file && rewind_ok){
+            SetLastError(NO_ERROR);
+            size=GetFileSize(h,&high);
 			
-			global_handle = GlobalAlloc(GMEM_MOVEABLE,size);
+			global_handle = (!high && (size!=INVALID_FILE_SIZE || GetLastError()==NO_ERROR)) ? GlobalAlloc(GMEM_MOVEABLE,size) : NULL;
 			if (global_handle)
 			{
 				char *buf;
@@ -12280,7 +12291,8 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 				}
 			}
 
-			CloseHandle(h);
+            }
+            if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);
 		}
 		else
 		{

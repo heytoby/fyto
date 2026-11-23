@@ -11,6 +11,8 @@ typedef struct fyto_jpeg_decode {
     struct jpeg_source_mgr input;
     jmp_buf jump;
     const BYTE *bytes;
+    IStream *stream;
+    BYTE buffer[65536];
     size_t size, position;
     BOOL (*cancelled)(void *);
     void *context;
@@ -28,9 +30,19 @@ static void fyto_jpeg_source_end(j_decompress_ptr codec) { (void)codec; }
 static boolean fyto_jpeg_source_fill(j_decompress_ptr codec)
 {
     fyto_jpeg_decode *decode = (fyto_jpeg_decode *)codec->client_data;
-    size_t count = decode->size - decode->position;
-    if (!count || (decode->cancelled && decode->cancelled(decode->context)))
+    size_t count;
+    if (decode->cancelled && decode->cancelled(decode->context))
         longjmp(decode->jump, 1);
+    if (decode->stream) {
+        ULONG got=0;
+        HRESULT result=decode->stream->lpVtbl->Read(decode->stream,decode->buffer,sizeof(decode->buffer),&got);
+        if(FAILED(result) || !got)longjmp(decode->jump,1);
+        decode->input.next_input_byte=decode->buffer;
+        decode->input.bytes_in_buffer=got;
+        return TRUE;
+    }
+    count=decode->size-decode->position;
+    if(!count)longjmp(decode->jump,1);
     if (count > 65536) count = 65536;
     decode->input.next_input_byte = decode->bytes + decode->position;
     decode->input.bytes_in_buffer = count;
@@ -49,7 +61,7 @@ static void fyto_jpeg_source_skip(j_decompress_ptr codec, long count)
     codec->src->bytes_in_buffer -= count;
 }
 
-static HBITMAP fyto_jpeg_decode_pixels(const BYTE *bytes, size_t size,
+static HBITMAP fyto_jpeg_decode_source(const BYTE *bytes, size_t size, IStream *stream,
     UINT expected_wide, UINT expected_high, UINT denominator, UINT bit_count,
     UINT *wide, UINT *high, BOOL (*cancelled)(void *), void *context)
 {
@@ -57,13 +69,18 @@ static HBITMAP fyto_jpeg_decode_pixels(const BYTE *bytes, size_t size,
     HBITMAP result = NULL;
     BYTE *pixels;
     UINT stride;
-    if (!bytes || !size || (bit_count != 24 && bit_count != 32)) return NULL;
+    if ((!stream && (!bytes || !size)) || (bit_count != 24 && bit_count != 32)) return NULL;
+    if(stream){
+        LARGE_INTEGER start={0};
+        if(FAILED(stream->lpVtbl->Seek(stream,start,STREAM_SEEK_SET,NULL)))return NULL;
+    }
     decode = (fyto_jpeg_decode *)calloc(1, sizeof(*decode));
     if (!decode) return NULL;
     decode->codec.err = jpeg_std_error(&decode->error);
     decode->error.error_exit = fyto_jpeg_error;
     decode->error.output_message = fyto_jpeg_silent;
     decode->codec.client_data = decode;
+    decode->stream = stream;
     decode->bytes = bytes;
     decode->size = size;
     decode->cancelled = cancelled;
@@ -110,6 +127,20 @@ done:
     jpeg_destroy_decompress(&decode->codec);
     free(decode);
     return result;
+}
+static HBITMAP fyto_jpeg_decode_pixels(const BYTE *bytes,size_t size,
+    UINT expected_wide,UINT expected_high,UINT denominator,UINT bit_count,
+    UINT *wide,UINT *high,BOOL (*cancelled)(void *),void *context)
+{
+    return fyto_jpeg_decode_source(bytes,size,NULL,expected_wide,expected_high,
+        denominator,bit_count,wide,high,cancelled,context);
+}
+static HBITMAP fyto_jpeg_decode_stream(IStream *stream,
+    UINT expected_wide,UINT expected_high,UINT denominator,UINT bit_count,
+    UINT *wide,UINT *high,BOOL (*cancelled)(void *),void *context)
+{
+    return stream ? fyto_jpeg_decode_source(NULL,0,stream,expected_wide,expected_high,
+        denominator,bit_count,wide,high,cancelled,context) : NULL;
 }
 #endif
 

@@ -21,6 +21,7 @@ typedef struct fyto_wic_image {
     UINT wide, high;
 #ifdef FYTO_HAVE_TURBO_JPEG
     HGLOBAL input_handle;
+    IStream *input_stream;
     const BYTE *input_data;
     size_t input_size;
     BOOL (*cancelled)(void *);
@@ -51,6 +52,8 @@ static void fyto_jpeg_set_input(fyto_wic_image *jpeg, IStream *stream,
     BOOL (*cancelled)(void *), void *context)
 {
     HGLOBAL handle;
+    jpeg->cancelled=cancelled;
+    jpeg->cancel_context=context;
     if (SUCCEEDED(GetHGlobalFromStream(stream, &handle)))
     {
         jpeg->input_data = (const BYTE *)GlobalLock(handle);
@@ -62,6 +65,18 @@ static void fyto_jpeg_set_input(fyto_wic_image *jpeg, IStream *stream,
             jpeg->cancel_context = context;
         }
     }
+    else {
+        /* A private cursor keeps WIC metadata and libjpeg scans independent.
+           File-backed streams remain bounded; no compressed-file copy. */
+        stream->lpVtbl->Clone(stream,&jpeg->input_stream);
+    }
+}
+static HBITMAP fyto_jpeg_decode_image(const fyto_wic_image *jpeg,
+    UINT expected_wide,UINT expected_high,UINT denominator,UINT bit_count,
+    UINT *wide,UINT *high,BOOL (*cancelled)(void *),void *context)
+{
+    return fyto_jpeg_decode_source(jpeg->input_data,jpeg->input_size,jpeg->input_stream,
+        expected_wide,expected_high,denominator,bit_count,wide,high,cancelled,context);
 }
 static BOOL fyto_jpeg_cancelled(const fyto_wic_image *jpeg)
 {
@@ -73,6 +88,7 @@ static void fyto_wic_close(fyto_wic_image *jpeg)
 {
 #ifdef FYTO_HAVE_TURBO_JPEG
     if (jpeg->input_handle) GlobalUnlock(jpeg->input_handle);
+    if (jpeg->input_stream) jpeg->input_stream->lpVtbl->Release(jpeg->input_stream);
 #endif
     if (jpeg->srgb) IWICColorContext_Release(jpeg->srgb);
     if (jpeg->profile) IWICColorContext_Release(jpeg->profile);
@@ -211,7 +227,7 @@ static HBITMAP fyto_jpeg_full(const fyto_wic_image *jpeg, int orientation, UINT 
        sRGB-equivalent ones cost nothing. Only exotic profiles use WIC. */
     if (jpeg->icc.state != FYTO_ICC_UNSUPPORTED)
     {
-        bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
+        bitmap = fyto_jpeg_decode_image(jpeg,
             jpeg->wide, jpeg->high, 1, 32, wide, high,
             jpeg->cancelled, jpeg->cancel_context);
         if (bitmap)
@@ -303,7 +319,7 @@ static HBITMAP fyto_jpeg_preview(const fyto_wic_image *jpeg, UINT edge, UINT *wi
         UINT denominator = 4;
         UINT preview_edge = min(edge, (image_edge + 3) / 4);
         if ((image_edge + 3) / 4 > preview_edge) denominator = 8;
-        bitmap = fyto_jpeg_decode_pixels(jpeg->input_data, jpeg->input_size,
+        bitmap = fyto_jpeg_decode_image(jpeg,
             jpeg->wide, jpeg->high, denominator, 24, wide, high,
             jpeg->cancelled, jpeg->cancel_context);
         if (bitmap && jpeg->icc.state == FYTO_ICC_MATRIX)
