@@ -8,7 +8,7 @@
 #undef NDEBUG
 #endif
 #include <assert.h>
-typedef struct {HBITMAP hbitmap;int wide,high;} _viv_preview_t;
+typedef struct {HBITMAP hbitmap;int wide,high;BOOL defer_detail;} _viv_preview_t;
 static struct {WIN32_FIND_DATA file;_viv_preview_t image;unsigned used;} _viv_recent_previews[8];
 static unsigned _viv_recent_preview_slot;
 static WIN32_FIND_DATA file,*_viv_frame_fd=&file;

@@ -132,6 +132,7 @@ static void _viv_viewport_rect(RECT *r){int w=fake_window.right-fake_window.left
 static const wchar_t *string_get_filename_part(const wchar_t *p){const wchar_t *last=wcsrchr(p,L'\\');return last?last+1:p;}
 static unsigned long long os_get_tick_count(void){return 100;}
 static void _viv_timer_start(void){}
+static void _viv_complete_detail_actions(void){}
 static void _viv_update_src_pixel(int a,int b){(void)a;(void)b;}
 static void _viv_status_update(void){}
 static void _viv_update_1to1_scroll(int x,int y){(void)x;(void)y;}

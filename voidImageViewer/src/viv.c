@@ -354,7 +354,7 @@ typedef struct _viv_load_job_s
     wchar_t *filename;
     int render_wide, render_high;
     BOOL use_icm, use_orientation;
-    BOOL prefetch, have_preview, preview_only, defer_jpeg_detail;
+    BOOL prefetch, have_preview, preview_only;
     /* Display-size prefetch: render the bitmap at exactly the size the window
        will paint, instead of decoding a full-resolution frame. The geometry is
        copied from the window when the job is created, so the decode thread
@@ -479,6 +479,11 @@ static LRESULT CALLBACK _viv_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam
 static LRESULT CALLBACK _viv_fullscreen_proc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 static void _viv_command_with_is_key_repeat(int command,int is_key_repeat);
 static void _viv_command(int command);
+static BOOL _viv_detail_required(const WIN32_FIND_DATA *fd);
+static BOOL _viv_request_full_detail(UINT command);
+static void _viv_complete_detail_actions(void);
+static void _viv_drop_detail_actions(void);
+#define FYTO_DETAIL_ACTION_EXECUTE (WM_APP+163)
 static int _viv_process_install_command_line_options(wchar_t *cl);
 static void _viv_process_command_line(wchar_t *cl);
 static int _viv_init(int nCmdShow);
@@ -668,6 +673,7 @@ static void _viv_clear_frames(_viv_frame_t *frames,int loaded_count);
 static void viv_copy_current_image_to_last_image(void);
 static void _viv_activate_last(void);
 static void _viv_clear_last(void);
+static void _viv_clear_last_frames(void);
 static void _viv_refresh(void);
 static void _viv_show_cursor(void);
 static void _viv_hide_cursor(void);
@@ -736,7 +742,11 @@ static int _viv_frame_position = 0; // the current frame position
 static BYTE _viv_frame_looped = 0; // all frames have been displayed for this animation
 static BYTE _viv_is_slideshow_timeup = 0; // the slideshow timer has expired, but we are still showing an animation at least once.
 static _viv_preview_t _viv_preview;
-static DWORD _viv_jpeg_detail_started;
+typedef struct fyto_detail_action_s {struct fyto_detail_action_s *next;UINT command;} fyto_detail_action_t;
+static fyto_detail_action_t *_viv_detail_head,*_viv_detail_tail;
+static WIN32_FIND_DATA _viv_detail_fd;
+static BOOL _viv_detail_requested;
+static unsigned _viv_detail_generation;
 static struct {
     WIN32_FIND_DATA file;
     _viv_preview_t image;
@@ -788,8 +798,6 @@ static void _viv_remember_manual_size(void);
 #define FYTO_REFIT_WINDOW (WM_APP+26)
 #define FYTO_DIRECTORY_READY (WM_APP+27)
 #define FYTO_NAVIGATION_CONTINUE (WM_APP+28)
-#define FYTO_JPEG_DETAIL_TIMER (WM_APP+29)
-#define FYTO_JPEG_DETAIL_DELAY 180
 
 static BYTE _viv_fitting_window;
 static void _viv_fit_image_window(void);
@@ -1862,7 +1870,7 @@ static BOOL _viv_render_restore(const WIN32_FIND_DATA *file, _viv_preview_t *pre
         preview->high = slot->high;
         preview->image_wide = slot->image_wide;
         preview->image_high = slot->image_high;
-        preview->defer_detail = FALSE;
+        preview->defer_detail = TRUE;
         slot->used = ++_viv_render_stamp;
         return TRUE;
     }
@@ -2222,7 +2230,6 @@ static void _viv_clear_preview(void)
 {
     if (_viv_preview.defer_detail)
     {
-        KillTimer(_viv_hwnd, FYTO_JPEG_DETAIL_TIMER);
         _viv_preview.defer_detail = FALSE;
     }
     if (_viv_preview.hbitmap)
@@ -2343,13 +2350,7 @@ static void _viv_show_preview(_viv_preview_t *preview, const WIN32_FIND_DATA *fi
     _viv_clear();
     _viv_preview = *preview;
     preview->hbitmap = NULL;
-    if (!config_preload_next || _viv_is_slideshow) _viv_preview.defer_detail = FALSE;
-    if (_viv_preview.defer_detail)
-    {
-        _viv_jpeg_detail_started = GetTickCount();
-        if (!SetTimer(_viv_hwnd, FYTO_JPEG_DETAIL_TIMER, FYTO_JPEG_DETAIL_DELAY, NULL))
-            _viv_preview.defer_detail = FALSE;
-    }
+    /* Fit-view previews stay authoritative until an operation requests original pixels. */
     _viv_image_wide = _viv_preview.image_wide;
     _viv_image_high = _viv_preview.image_high;
     os_copy_memory(_viv_frame_fd, file, sizeof(WIN32_FIND_DATA));
@@ -2532,6 +2533,7 @@ static void _viv_open(WIN32_FIND_DATA *fd,int is_preload)
          (_viv_preload_preview.hbitmap || _viv_preload_frames)))) return;
     if (!is_preload)
     {
+        if(_viv_detail_requested && !_viv_same_image(fd,&_viv_detail_fd))_viv_drop_detail_actions();
         if (!_viv_dispatching_navigation && !_viv_same_image(fd, &_viv_requested_fd))
         {
             _viv_directory_step_count = 0;
@@ -2605,7 +2607,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 		return;
 	}
 	else
-	if ((!is_preload) && (*_viv_preload_fd->cFileName) && _viv_same_image(_viv_preload_fd, fd) &&
+	if ((!is_preload) && !_viv_detail_required(fd) && (*_viv_preload_fd->cFileName) && _viv_same_image(_viv_preload_fd, fd) &&
 		(_viv_load_is_preload || _viv_preload_preview.hbitmap || _viv_preload_frames))
 	{
         /* A running speculative decode must not hide an existing rendered
@@ -2629,7 +2631,8 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 		if (_viv_open_preload()) return;
 	}
 	else
-	if ((!is_preload) && (_viv_load_image_thread) && (!_viv_load_image_terminate) && (_viv_load_image_filename) && _viv_same_image(_viv_load_fd, fd))
+	if ((!is_preload) && (_viv_load_image_thread) && (!_viv_load_image_terminate) && (_viv_load_image_filename) && _viv_same_image(_viv_load_fd, fd) &&
+        (!_viv_detail_required(fd) || !_viv_active_load || !_viv_active_load->display_prefetch))
 	{
 		debug_printf("already loading...\n");
 		// already loading this one..
@@ -2637,7 +2640,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 		return;
 	}
 	
-    if (!is_preload)
+    if (!is_preload && !_viv_detail_required(fd))
     {
         if (_viv_preload_preview.hbitmap && _viv_same_image(_viv_preload_fd, fd))
         {
@@ -2715,13 +2718,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
         job->use_icm = config_icm;
         job->use_orientation = config_orientation;
         job->prefetch = is_preload;
-        // Decode the selected image once. The deferred-detail path used to end
-        // the job after a quarter-scale preview, wait for a 180 ms timer and
-        // then re-open the file for a full decode: two file reads, two decodes
-        // and a hard latency floor on every single image. The preview below is
-        // still posted while this same job continues to the full frame, so the
-        // user gets a progressive first paint without paying for it twice.
-        job->defer_jpeg_detail = FALSE;
+        /* Original-resolution work is requested by zoom/export operations. */
         if (is_preload)
         {
             const UINT64 budget = FYTO_NEIGHBOR_BYTES / 4;
@@ -2732,7 +2729,7 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
         /* A display-size prefetch is only meaningful in the plain fit view;
            when the user has zoomed, the existing frame prefetch (with its mipmap
            chain) is the better guess. */
-        job->display_prefetch = (is_preload ||
+        job->display_prefetch = !_viv_detail_required(fd) && (is_preload ||
             (!cached.hbitmap && !(_viv_preview.hbitmap && _viv_same_image(_viv_frame_fd, fd)))) &&
             !_viv_is_slideshow &&
             !_viv_zoom_pos && !_viv_1to1 && !_viv_explicit_fit &&
@@ -2786,6 +2783,50 @@ static BOOL _viv_open_pending_load(void)
         _viv_open(fd, _viv_load_image_next_is_preload);
     mem_free(fd);
     return TRUE;
+}
+
+static BOOL _viv_detail_required(const WIN32_FIND_DATA *fd)
+{
+    return _viv_detail_requested && _viv_same_image(fd,&_viv_detail_fd);
+}
+static void _viv_drop_detail_actions(void)
+{
+    while(_viv_detail_head){
+        fyto_detail_action_t *next=_viv_detail_head->next;
+        mem_free(_viv_detail_head);_viv_detail_head=next;
+    }
+    _viv_detail_tail=NULL;_viv_detail_requested=FALSE;_viv_detail_generation++;
+}
+static BOOL _viv_request_full_detail(UINT command)
+{
+    fyto_detail_action_t *action;
+    if(!*_viv_requested_fd.cFileName)return FALSE;
+    if(_viv_frame_count && _viv_frames && _viv_same_image(_viv_frame_fd,&_viv_requested_fd))return FALSE;
+    if(!_viv_detail_required(&_viv_requested_fd)){
+        _viv_drop_detail_actions();_viv_detail_fd=_viv_requested_fd;_viv_detail_requested=TRUE;
+    }
+    if(command){
+        action=mem_alloc(sizeof(*action));action->next=NULL;action->command=command;
+        if(_viv_detail_tail)_viv_detail_tail->next=action;else _viv_detail_head=action;
+        _viv_detail_tail=action;
+    }
+    _viv_preview.defer_detail=FALSE;
+    if(!_viv_active_load || !_viv_same_image(_viv_load_fd,&_viv_detail_fd) || _viv_active_load->display_prefetch)
+        _viv_open(&_viv_detail_fd,0);
+    return TRUE;
+}
+static void _viv_complete_detail_actions(void)
+{
+    if(!_viv_detail_requested || !_viv_frame_count || !_viv_frames ||
+        !_viv_same_image(_viv_frame_fd,&_viv_detail_fd) ||
+        !_viv_same_image(&_viv_requested_fd,&_viv_detail_fd))return;
+    _viv_detail_requested=FALSE;
+    while(_viv_detail_head){
+        fyto_detail_action_t *next=_viv_detail_head->next;
+        PostMessageW(_viv_hwnd,FYTO_DETAIL_ACTION_EXECUTE,_viv_detail_head->command,_viv_detail_generation);
+        mem_free(_viv_detail_head);_viv_detail_head=next;
+    }
+    _viv_detail_tail=NULL;
 }
 
 static void _viv_on_size(void)
@@ -2862,6 +2903,12 @@ static void _viv_command(int command_id)
 
 static void _viv_command_with_is_key_repeat(int command_id,int is_key_repeat)
 {
+    switch(command_id){
+        case VIV_ID_EDIT_COPY_IMAGE:case VIV_ID_FILE_PRINT:
+        case VIV_ID_EDIT_ROTATE_90:case VIV_ID_EDIT_ROTATE_270:case VIV_ID_VIEW_1TO1:
+            if(_viv_request_full_detail(command_id))return;
+            break;
+    }
 	// Parse the menu selections:
 	switch (command_id)
 	{
@@ -3877,6 +3924,12 @@ static void _viv_paint_empty(HDC dc)
 
 static LRESULT CALLBACK _viv_proc_inner(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
+    if(msg==FYTO_DETAIL_ACTION_EXECUTE){
+        if((unsigned)lParam==_viv_detail_generation && _viv_same_image(&_viv_requested_fd,&_viv_detail_fd))
+            _viv_command((int)wParam);
+        return 0;
+    }
+    if(msg==WM_DESTROY)_viv_drop_detail_actions();
 if(fyto_hover_input(hwnd,msg,wParam,lParam))return 0;
 if(fyto_window_drag(hwnd,msg,wParam,lParam))return 0;
 if(msg==WM_NCLBUTTONDOWN && wParam==FYTO_TITLE_PIN_HIT){
@@ -4186,6 +4239,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 
 							allow_preload_next = 0;
 
+							if(e->type==_VIV_REPLY_LOAD_IMAGE_FAILED && _viv_detail_required(_viv_load_fd))_viv_drop_detail_actions();
 							debug_printf((e->type == _VIV_REPLY_LOAD_IMAGE_FAILED) ? "_VIV_REPLY_LOAD_IMAGE_FAILED\n" : "_VIV_REPLY_LOAD_IMAGE_COMPLETE\n");
 							
 							if (_viv_load_image_terminate)
@@ -4401,6 +4455,7 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 									first_frame->frame.hbitmap = 0;
 									first_frame->frame.mipmap = NULL;
 									_viv_frame_loaded_count = 1;
+                                    _viv_complete_detail_actions();
 
                                     if (keep_display)
                                     {
@@ -4578,27 +4633,6 @@ if(msg==WM_NCLBUTTONDOWN && config_show_caption){if(_viv_is_fullscreen && wParam
 			switch(wParam)
 			{
 
-
-                case FYTO_JPEG_DETAIL_TIMER:
-                    if (GetTickCount() - _viv_jpeg_detail_started < FYTO_JPEG_DETAIL_DELAY) break;
-                    /* Let the neighbour prefetch finish first: starting a full
-                       decode now would cancel it and the next step would miss. */
-                    if (_viv_active_load && _viv_load_is_preload)
-                    {
-                        _viv_jpeg_detail_started = GetTickCount();
-                        break;
-                    }
-                    KillTimer(hwnd, FYTO_JPEG_DETAIL_TIMER);
-                    if (_viv_preview.defer_detail)
-                    {
-                        _viv_preview.defer_detail = FALSE;
-                        if (_viv_same_image(_viv_frame_fd, &_viv_requested_fd))
-                        {
-                            WIN32_FIND_DATA file = *_viv_frame_fd;
-                            _viv_open(&file, 0);
-                        }
-                    }
-                    break;
 
 				case VIV_ID_STATUS_TEMP_TEXT_TIMER:
 					_viv_status_set_temp_text(0);
@@ -10908,6 +10942,7 @@ static void _viv_frame_prev(void)
 
 static void _viv_toggle_fit_100(void)
 {
+    _viv_request_full_detail(0);
  int rw,rh;
  if (!_viv_image_wide || !_viv_image_high) return;
  _viv_get_render_size(&rw,&rh);
@@ -12004,8 +12039,8 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
     preview.high = target_high;
     preview.image_wide = image_wide;
     preview.image_high = image_high;
-    /* Full resolution is decoded after the image has been idle for a moment
-       (or immediately when the user zooms in), never on the navigation path. */
+    /* Ordinary browsing retains display pixels. Zoom and export operations
+       explicitly request original pixels through the detail action queue. */
     preview.defer_detail = TRUE;
     preview.display = TRUE;
     job->preview_only = TRUE;
@@ -12065,7 +12100,7 @@ static BOOL _viv_load_fast_jpeg(_viv_load_job_t *job, IStream *stream, int *know
                     if (_viv_load_discarded(job)) DeleteObject(preview.hbitmap);
                     else
                     {
-                        preview.defer_detail = job->defer_jpeg_detail;
+                        preview.defer_detail = job->display_prefetch;
                         if (preview.defer_detail || (reduce && _viv_loading_in_background(job)))
                         {
                             job->preview_only = TRUE;
@@ -15430,6 +15465,7 @@ static void _viv_do_mousewheel_action(int action,int delta,int x,int y)
 {
 	if (action == 0)
 	{
+        _viv_request_full_detail(0);
 		int cursor_x;
 		int cursor_y;
 		int rx;
@@ -16357,6 +16393,7 @@ static void _viv_set_view_mode(BOOL standard)
 
 static void _viv_start_first_frame(void)
 {
+    _viv_complete_detail_actions();
     BOOL was_deferred = title_deferred;
     title_deferred = TRUE;
     _viv_update_title();
@@ -16476,6 +16513,7 @@ static void _viv_remember_preview(_viv_preview_t preview)
     if (_viv_recent_previews[slot].image.hbitmap)
         DeleteObject(_viv_recent_previews[slot].image.hbitmap);
     _viv_recent_previews[slot].image = preview;
+    _viv_recent_previews[slot].image.defer_detail = TRUE;
     _viv_recent_previews[slot].file = *_viv_frame_fd;
     _viv_recent_previews[slot].used = ++_viv_recent_preview_slot;
     /* Previews sit on top of the frame caches in the same budget; they are the
@@ -16533,7 +16571,7 @@ static void viv_copy_current_image_to_last_image(void)
     {
         /* Display previews own browsing history now; do not keep an unrelated
            full-resolution last frame alive underneath them. */
-        _viv_clear_last();
+        _viv_clear_last_frames();
         /* Remember what was on screen even when it is not the final image:
            coming back to one of the last few images should not need another
            file read and decode. */
@@ -16662,6 +16700,11 @@ static void _viv_clear_last(void)
             _viv_recent_previews[i].image.hbitmap = NULL;
         }
     }
+    _viv_clear_last_frames();
+}
+
+static void _viv_clear_last_frames(void)
+{
 	if (_viv_last_frames)
 	{
 		_viv_clear_frames(_viv_last_frames,_viv_last_frame_count);

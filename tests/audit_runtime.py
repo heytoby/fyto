@@ -7,6 +7,7 @@ import os,sys,time,subprocess,shutil,json,hashlib,platform,math
 from PIL import Image,ImageDraw
 from window_test_helpers import u,g,wins,wait
 
+if os.getenv('GITHUB_ACTIONS')!='true':raise SystemExit('This test requires an isolated GitHub Actions runner.')
 root=Path(__file__).resolve().parents[1]
 out=root/'build/audit-runtime';out.mkdir(parents=True,exist_ok=True)
 scratch=out/'instance';scratch.mkdir(exist_ok=True)
@@ -39,7 +40,7 @@ k.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];k.OpenProcess.restype=w.HANDLE
 k.CloseHandle.argtypes=[w.HANDLE]
 ps.GetProcessMemoryInfo.argtypes=[w.HANDLE,c.POINTER(Counters),w.DWORD]
 u.GetGuiResources.argtypes=[w.HANDLE,w.DWORD];u.GetGuiResources.restype=w.DWORD
-records=[];samples=[];memory=[];checkpoints=[];offset=0;tail=b''
+records=[];samples=[];memory=[];checkpoints=[];copy_resources=[];copy_verified=False;offset=0;tail=b''
 def read_trace():
     global offset,tail
     if not trace.exists():return
@@ -75,6 +76,43 @@ def verify_pixel(color):
             expected=corner_colors[corner_map[image_index][corner]]
             assert max(abs(a-b) for a,b in zip(actual,expected))<=8,('EXIF corner',image_index+1,corner,actual,expected)
     finally:g.SelectObject(mem,old);g.DeleteObject(bitmap);g.DeleteDC(mem);u.ReleaseDC(hwnd,dc)
+def verify_original_copy():
+    global copy_verified
+    header=(root/'voidImageViewer/src/viv.h').read_text(encoding='utf8')
+    start=header.index('VIV_ID_EDIT_CUT = 1000')
+    block=header[start:header.index('};',start)]
+    number=999;ids={}
+    for item in block.split(','):
+        item=item.strip()
+        if not item:continue
+        if '=' in item:
+            name,value=item.split('=',1);number=int(value.strip(),0)
+        else:name=item;number+=1
+        ids[name.strip()]=number
+    u.OpenClipboard.argtypes=[w.HWND];u.GetClipboardData.argtypes=[w.UINT];u.GetClipboardData.restype=w.HANDLE
+    class Bitmap(c.Structure):
+        _fields_=[('kind',w.LONG),('width',w.LONG),('height',w.LONG),('stride',w.LONG),('planes',w.WORD),('bpp',w.WORD),('bits',c.c_void_p)]
+    g.GetObjectW.argtypes=[w.HGDIOBJ,c.c_int,c.c_void_p]
+    assert u.OpenClipboard(None)
+    try:assert u.EmptyClipboard()
+    finally:u.CloseClipboard()
+    assert u.PostMessageW(hwnd,0x111,ids['VIV_ID_EDIT_COPY_IMAGE'],0)
+    deadline=time.monotonic()+8
+    while time.monotonic()<deadline:
+        read_trace();measure()
+        if u.OpenClipboard(None):
+            try:
+                if u.IsClipboardFormatAvailable(2):
+                    bitmap=u.GetClipboardData(2);info=Bitmap()
+                    assert bitmap and g.GetObjectW(bitmap,c.sizeof(info),c.byref(info))
+                    assert (info.width,info.height)==(6000,4000),(info.width,info.height)
+                    copy_verified=True
+                    assert u.EmptyClipboard()
+                    return
+            finally:u.CloseClipboard()
+        time.sleep(.005)
+    raise AssertionError('copy image did not produce original resolution pixels')
+
 def percentile(values,p):return sorted(values)[max(0,math.ceil(len(values)*p)-1)]
 process=subprocess.Popen([str(viewer.resolve()),'/window',str((scratch/'00.jpg').resolve())],cwd=scratch,env=env)
 handle=k.OpenProcess(0x410,False,process.pid);assert handle
@@ -82,7 +120,10 @@ hwnd=None;failure=None
 try:
     wait(lambda:any(name=='fyto' for _,name in wins(process.pid)))
     hwnd=next(h for h,name in wins(process.pid) if name=='fyto')
-    await_paint('00.jpg',0);verify_pixel(colors[0]);time.sleep(.5)
+    await_paint('00.jpg',0);verify_pixel(colors[0])
+    startup_resources=list(memory);memory.clear()
+    verify_original_copy();copy_resources=list(memory);memory[:]=startup_resources
+    time.sleep(.5)
     index=0;direction=1
     for i in range(1100):
         if index==7:direction=-1
@@ -112,14 +153,14 @@ finally:
 warm=[x['ms'] for x in samples[100:]]
 ui_start=samples[100]['input_qpc'] if len(samples)>100 else 0
 ui=[(row[2]-row[1])*1000/freq for row in records if row[1]>=ui_start and row[0] in [15,0x20A,0x100]]
-checks={'complete_1000':len(warm)==1000,'warm_p95_le_33ms':bool(warm) and percentile(warm,.95)<=33,
+checks={'copy_original_ready':copy_verified,'complete_1000':len(warm)==1000,'warm_p95_le_33ms':bool(warm) and percentile(warm,.95)<=33,
     'ui_p95_le_8ms':bool(ui) and percentile(ui,.95)<=8,'ui_max_le_16ms':bool(ui) and max(ui)<=16,
     'private_peak_le_256MiB':bool(memory) and max(x['private'] for x in memory)<=256*1024**2,
     'gdi_stable':len(checkpoints)==3 and checkpoints[-1]['gdi']<=checkpoints[0]['gdi']+2,
     'no_private_growth':len(checkpoints)==3 and checkpoints[-1]['private']<=checkpoints[0]['private']+4*1024**2}
 result={'platform':platform.platform(),'exe_sha256':hashlib.sha256(viewer.read_bytes()).hexdigest(),'commit':os.getenv('GITHUB_SHA'),
     'scope':'CI host; input posting to completed application WM_PAINT; excludes physical scanout; generated 24 MP local JPEGs with EXIF 1-8 corner verification, no NAS',
-    'checkpoints':checkpoints,'display_dimensions':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':fixtures,'failure':failure,'checks':checks,'warm_p95_ms':percentile(warm,.95) if warm else None,
+    'copy_operation_peak_MiB':max((x['private'] for x in copy_resources),default=0)/1024**2,'checkpoints':checkpoints,'display_dimensions':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':fixtures,'failure':failure,'checks':checks,'warm_p95_ms':percentile(warm,.95) if warm else None,
     'ui_p95_ms':percentile(ui,.95) if ui else None,'ui_max_ms':max(ui) if ui else None,
     'private_peak_MiB':max((x['private'] for x in memory),default=0)/1024**2,'samples':samples,'resources':memory}
 (out/'results.json').write_text(json.dumps(result,indent=2),encoding='utf8')
