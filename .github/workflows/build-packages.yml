@@ -32,12 +32,18 @@ jobs:
       - name: Audit actual paint latency and 1000 image transitions
         shell: pwsh
         run: python tests/audit_runtime.py
+      - name: Check native formats, animation, replaced files and large directories
+        shell: pwsh
+        run: python tests/audit_extended.py
       - name: Preserve raw audit evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fyto-runtime-audit
-          path: build/audit-runtime/*
+          path: |
+            build/audit-runtime/*
+            build/extended-audit/results.json
+            build/extended-audit/*-render.png
           if-no-files-found: warn
           retention-days: 30
       - name: Verify MSI uses the registered install directory and preserves settings
