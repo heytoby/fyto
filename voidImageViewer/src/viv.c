@@ -12014,7 +12014,7 @@ static BOOL _viv_jpeg_display_preview(_viv_load_job_t *job, fyto_wic_image *jpeg
 static BOOL _viv_load_fast_jpeg(_viv_load_job_t *job, IStream *stream, int *known_orientation, _viv_reply_load_image_first_frame_t *frame)
 {
     fyto_wic_image jpeg = {0};
-    BOOL loaded = FALSE;
+    BOOL loaded = FALSE, codec_closed = FALSE;
     IStream *input = fyto_jpeg_stream_create(stream, _viv_load_discarded, job);
 
 #ifdef FYTO_HAVE_TURBO_JPEG
@@ -12082,6 +12082,10 @@ static BOOL _viv_load_fast_jpeg(_viv_load_job_t *job, IStream *stream, int *know
         if (!loaded && !_viv_load_discarded(job))
         {
             frame->frame.hbitmap = fyto_jpeg_full(&jpeg, orientation, &frame->wide, &frame->high);
+            /* The DIB owns its pixels. Release the decoder's full-resolution
+               intermediates before allocating the display/mipmap chain. */
+            fyto_wic_close(&jpeg);
+            codec_closed = TRUE;
             if (frame->frame.hbitmap)
             {
                 if (_viv_reply_display_frame(job, &frame->frame.hbitmap,
@@ -12093,7 +12097,7 @@ static BOOL _viv_load_fast_jpeg(_viv_load_job_t *job, IStream *stream, int *know
         }
     }
 
-    fyto_wic_close(&jpeg);
+    if (!codec_closed) fyto_wic_close(&jpeg);
     if (input) input->lpVtbl->Release(input);
     return loaded;
 }
