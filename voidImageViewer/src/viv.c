@@ -16229,9 +16229,9 @@ static void _viv_next_manual(int prev, int repeat)
     if (_viv_directory_step_count == ARRAYSIZE(_viv_directory_steps)) return;
     _viv_directory_steps[_viv_directory_step_count++] =
         (prev ? FYTO_NAV_PREVIOUS : 0) | (_viv_wheel_navigation ? FYTO_NAV_WHEEL : FYTO_NAV_WRAP);
-    /* Navigate from the cached listing right away. Waiting for the change
-       notification to be re-validated made almost every step take a rescan
-       round trip once the folder had been touched; refresh afterwards. */
+    /* The snapshot is usable only while its live directory watch is quiet.
+       Changed folders wait for a new listing; unchanged folders retain their
+       display cache and need no rescan. */
     if (!_viv_navigation_batching) _viv_replay_directory_navigation(TRUE);
     if (_viv_directory_cache && _viv_directory_changed(_viv_directory_cache))
         _viv_schedule_directory_scan();
@@ -16248,12 +16248,10 @@ static void _viv_preload_next(void)
     if (!config_preload_next || _viv_active_load || _viv_retired_load || _viv_directory_step_count) return;
     if (!_viv_playlist_start && !_viv_random && *_viv_current_fd->cFileName)
     {
-        // "preload next" is only a guess. The directory cache refreshes on a
-        // change notification, and waiting for that refresh made every preload
-        // miss once the folder had been touched: the neighbour was never
-        // decoded beforehand, so each single step paid a full cold decode.
-        // A stale guess is harmless - navigation still validates the file with
-        // _viv_same_image() and drops a mismatch - so resolve the neighbour even
+        // A prefetch is speculative, but still needs a valid directory
+        // snapshot. A changed folder is rescanned before resolving its next
+        // neighbour; cached file size/time alone cannot identify a replacement.
+        // The same watch validation applies even
         // while the cache is waiting for its rescan, and let a failed lookup
         // schedule that rescan as before.
         if (_viv_cached_directory_next(_viv_current_fd, _viv_last_is_prev, TRUE, &next, TRUE))

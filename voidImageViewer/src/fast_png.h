@@ -133,7 +133,7 @@ static HBITMAP fyto_wic_static_full(IStream *stream, const CLSID *codec, BOOL al
         /* The Windows ICO decoder explicitly does not implement color contexts.
            This means no exposed profile, not an undecodable icon. Other errors
            retain the strict color-management failure path. */
-        if(metadata==WINCODEC_ERRUNSUPPORTEDOPERATION || metadata==E_NOTIMPL)icm=FALSE;
+        if(metadata==WINCODEC_ERR_UNSUPPORTEDOPERATION || metadata==E_NOTIMPL)icm=FALSE;
     }
     if(icm && !fyto_wic_set_color(&png))goto done;
     source = (IWICBitmapSource *)png.frame;
