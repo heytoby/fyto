@@ -2669,6 +2669,17 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
         _viv_active_load = NULL;
     }
 
+    /* A cancelled codec retains its allocations until it exits. Serialize
+       full-resolution upgrades behind that lifetime; selected display-size
+       loads can still start immediately while an old job retires. */
+    if(!is_preload && _viv_retired_load && !_viv_active_load &&
+        _viv_preview.hbitmap && _viv_same_image(_viv_frame_fd,fd)){
+        _viv_load_image_next_fd=mem_alloc(sizeof(WIN32_FIND_DATA));
+        *_viv_load_image_next_fd=*fd;
+        _viv_load_image_next_is_preload=0;
+        _viv_status_update();
+        return;
+    }
 	if (_viv_active_load)
 	{
 		// already loading a different image.
