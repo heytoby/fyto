@@ -2093,7 +2093,7 @@ static void _viv_mipmap_free(_viv_mipmap_t *mipmap)
 // so _viv_cache_image_fits() rejected every image above 3 MP and both
 // "preload next" and "cache last" silently did nothing; every navigation then
 // paid a cold decode. 224 MB holds a 24 MP chain (32 M pixels, 128 MB).
-#define FYTO_NEIGHBOR_BYTES (224ull * 1024 * 1024)
+#define FYTO_NEIGHBOR_BYTES (32ull * 1024 * 1024)
 // Preview pixels kept for an image that is too large to cache whole.
 #define FYTO_NEIGHBOR_PIXELS (3ull * 1024 * 1024)
 
@@ -16488,12 +16488,21 @@ static void _viv_remember_preview(_viv_preview_t preview)
 // Keep a small, already rendered bitmap when the full image will be freed.
 static void _viv_keep_current_preview(void)
 {
+    _viv_preview_t rendered={0};
     UINT wide = _viv_image_wide, high = _viv_image_high;
     _viv_mipmap_t *mip;
     _viv_mipmap_t *take = NULL;
     HBITMAP hbitmap;
     if (!config_cache_last || _viv_frame_count != 1 || _viv_frame_loaded_count != 1 ||
         !*_viv_frame_fd->cFileName || !_viv_frames) return;
+
+    /* Preserve exactly the pixels that were displayed, not a full original
+       plus its mipmap chain. This also avoids a coarse mip being upscaled. */
+    if(_viv_render_restore(_viv_frame_fd,&rendered)){
+        rendered.defer_detail=TRUE;
+        _viv_remember_preview(rendered);
+        return;
+    }
 
     /* Keep the frame itself when it already fits the budget. The old loop
        halved unconditionally, so a quarter-scale frame was remembered as a
@@ -16522,6 +16531,9 @@ static void viv_copy_current_image_to_last_image(void)
 {
     if (_viv_preview.hbitmap)
     {
+        /* Display previews own browsing history now; do not keep an unrelated
+           full-resolution last frame alive underneath them. */
+        _viv_clear_last();
         /* Remember what was on screen even when it is not the final image:
            coming back to one of the last few images should not need another
            file read and decode. */
