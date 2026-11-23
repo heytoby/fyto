@@ -11,6 +11,17 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
+      - name: Probe isolated runner display modes
+        shell: pwsh
+        run: |
+          Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class AuditDisplay { [DllImport("user32.dll")] public static extern int GetSystemMetrics(int n); }'
+          Write-Output ("Initial display: {0}x{1}" -f [AuditDisplay]::GetSystemMetrics(0),[AuditDisplay]::GetSystemMetrics(1))
+          $command=Get-Command Set-DisplayResolution -ErrorAction SilentlyContinue
+          if($command){
+            try { Set-DisplayResolution -Width 2560 -Height 1440 -Force -ErrorAction Stop }
+            catch { Write-Output ("Display mode unavailable: "+$_.Exception.Message) }
+          } else { Write-Output 'Set-DisplayResolution is unavailable on this runner.' }
+          Write-Output ("Final display: {0}x{1}" -f [AuditDisplay]::GetSystemMetrics(0),[AuditDisplay]::GetSystemMetrics(1))
       - uses: actions/download-artifact@v4
         with:
           name: fyto-runtime-audit
