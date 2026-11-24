@@ -2731,7 +2731,8 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 	{
 		DWORD thread_id;
 		RECT rect;
-        _viv_load_job_t *if(!is_preload)_viv_retain_display_before_load(fd);
+        _viv_load_job_t *job;
+        if(!is_preload)_viv_retain_display_before_load(fd);
         job = mem_alloc(sizeof(*job));
 
 		_viv_viewport_rect(&rect);
