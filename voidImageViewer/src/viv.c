@@ -2533,10 +2533,24 @@ static void _viv_retain_display_before_load(const WIN32_FIND_DATA *target)
 {
     _viv_preview_t display={0};WIN32_FIND_DATA shown;
     if(!_viv_frames || _viv_frame_count!=1 || _viv_frame_loaded_count!=1 ||
-        _viv_preview.hbitmap || _viv_is_slideshow || _viv_1to1 || _viv_zoom_pos ||
+        _viv_preview.hbitmap || _viv_is_slideshow || _viv_1to1 || _viv_zoom_pos || _viv_view_x || _viv_view_y ||
         _viv_same_image(_viv_frame_fd,target) ||
         (UINT64)_viv_image_wide*_viv_image_high*4<=32ull*1024*1024)return;
-    if(!_viv_render_restore(_viv_frame_fd,&display))return;
+    if(!_viv_render_restore(_viv_frame_fd,&display)){
+        _viv_mipmap_t *mip,*take=NULL;BITMAP info={0};int rw=0,rh=0;
+        _viv_get_render_size(&rw,&rh);
+        for(mip=_viv_frames[0].mipmap;mip;mip=mip->next){
+            BITMAP candidate;
+            if(!mip->hbitmap || !GetObject(mip->hbitmap,sizeof(candidate),&candidate))continue;
+            if(candidate.bmWidth<rw || candidate.bmHeight<rh)break;
+            take=mip;info=candidate;
+        }
+        if(!take)return;
+        display.hbitmap=take->hbitmap;take->hbitmap=NULL;
+        display.wide=info.bmWidth;display.high=info.bmHeight;
+        display.image_wide=_viv_image_wide;display.image_high=_viv_image_high;
+        display.defer_detail=TRUE;
+    }
     shown=*_viv_frame_fd;
     _viv_clear();
     _viv_preview=display;
