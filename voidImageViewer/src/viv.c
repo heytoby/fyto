@@ -2539,7 +2539,7 @@ static void _viv_retain_display_before_load(const WIN32_FIND_DATA *target)
     if(!_viv_render_restore(_viv_frame_fd,&display)){
         _viv_mipmap_t *mip,*take=NULL;BITMAP info={0};int rw=0,rh=0;
         _viv_get_render_size(&rw,&rh);
-        for(mip=_viv_frames[0].mipmap;mip;mip=mip->next){
+        for(mip=_viv_frames[0].mipmap;mip;mip=mip->mipmap){
             BITMAP candidate;
             if(!mip->hbitmap || !GetObject(mip->hbitmap,sizeof(candidate),&candidate))continue;
             if(candidate.bmWidth<rw || candidate.bmHeight<rh)break;
