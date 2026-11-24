@@ -80,8 +80,10 @@ save('alpha.ico',alpha.resize((256,256)),sizes=[(32,32),(256,256)])
 for mp,size in [(12,(4000,3000)),(24,(6000,4000)),(48,(8000,6000))]:
     save(str(mp)+'mp.jpg',patterned(size),quality=95,progressive=True)
 large=patterned((6000,4000))
+ImageDraw.Draw(large).rectangle((2744,1744,3256,2256),fill=(40,180,90))
 save('24mp-rgb.png',large)
 large_alpha=large.convert('RGBA');large_alpha.putalpha(128);save('24mp-alpha.png',large_alpha)
+ImageDraw.Draw(large).rectangle((2744,1744,3256,2256),fill=(40,90,200))
 save('24mp-rgb.tiff',large,compression='tiff_lzw')
 save('24mp-gray.tiff',large.convert('L'),compression='raw')
 save('24mp-cmyk.jpg',large.convert('CMYK'),quality=95)
@@ -228,14 +230,16 @@ for count in [10,1000,10000]:check('directory:'+str(count),lambda count=count:di
 def mixed_large_navigation():
     folder=out/'mixed-large';folder.mkdir()
     choices=['24mp-noise.png','24mp-rgb.png','24mp-rgb.tiff']
-    colors=[(170,90,160),(210,190,40),(210,190,40)];targets=[]
+    colors=[(170,90,160),(40,180,90),(40,90,200)];targets=[]
     for i,name in enumerate(choices):
         source=next(p for p in fixtures if p.name==name)
         target=folder/(str(i).zfill(2)+source.suffix);os.link(source,target);targets.append(target)
     p,h=launch(targets[0]);await_color(h,colors[0]);resources=[budget(p,24000000)]
     for iteration in range(18):
         index=(iteration+1)%len(targets);command(h,'VIV_ID_NAV_NEXT')
-        wait(lambda:label(h)==targets[index].name,30);await_color(h,colors[index])
+        wait(lambda:label(h)==targets[index].name,30)
+        try:await_color(h,colors[index])
+        except AssertionError:raise AssertionError({'iteration':iteration,'title':label(h),'actual_center':center(h),'expected':colors[index],'resources':process_resources(p.pid)})
         resources.append(budget(p,24000000))
     close(p,h);return {'transitions':18,'resources':resources}
 check('mixed-24mp-memory',mixed_large_navigation)
