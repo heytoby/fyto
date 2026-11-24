@@ -2535,7 +2535,7 @@ static void _viv_retain_display_before_load(const WIN32_FIND_DATA *target)
     if(!_viv_frames || _viv_frame_count!=1 || _viv_frame_loaded_count!=1 ||
         _viv_preview.hbitmap || _viv_is_slideshow || _viv_1to1 || _viv_zoom_pos ||
         _viv_same_image(_viv_frame_fd,target) ||
-        (UINT64)_viv_image_wide*_viv_image_high*4<=FYTO_CACHE_TOTAL_BYTES)return;
+        (UINT64)_viv_image_wide*_viv_image_high*4<=32ull*1024*1024)return;
     if(!_viv_render_restore(_viv_frame_fd,&display))return;
     shown=*_viv_frame_fd;
     _viv_clear();
