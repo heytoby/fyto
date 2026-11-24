@@ -32,7 +32,7 @@ def wait(fn,timeout=12):
 def command(hwnd,name):
     assert u.PostMessageW(hwnd,0x111,ids[name],0)
 def launch(path):
-    p=subprocess.Popen([str(viewer.resolve()),'/window',str(path.resolve())],cwd=out);processes.append(p)
+    p=subprocess.Popen([str(viewer.resolve()),'/window',str(path.resolve())],cwd=out,env=dict(os.environ,FYTO_AUDIT_HANDOFF=str((out/'handoff.tsv').resolve())));processes.append(p)
     wait(lambda:any(n=='fyto' for _,n in wins(p.pid)))
     h=next(h for h,n in wins(p.pid) if n=='fyto')
     wait(lambda:label(h)==path.name);return p,h
@@ -240,7 +240,9 @@ def mixed_large_navigation():
         wait(lambda:label(h)==targets[index].name,30)
         try:await_color(h,colors[index])
         except AssertionError:raise AssertionError({'iteration':iteration,'title':label(h),'actual_center':center(h),'expected':colors[index],'resources':process_resources(p.pid)})
-        resources.append(budget(p,24000000))
+        try:resources.append(budget(p,24000000))
+        except AssertionError:raise AssertionError({'iteration':iteration,'target':targets[index].name,
+            'resources':process_resources(p.pid),'handoff_trace':(out/'handoff.tsv').read_text() if (out/'handoff.tsv').exists() else None})
     close(p,h);return {'transitions':18,'resources':resources}
 check('mixed-24mp-memory',mixed_large_navigation)
 

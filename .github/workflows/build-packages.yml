@@ -46,6 +46,7 @@ jobs:
             build/audit-runtime/*
             build/icc-profile-audit/results.json
             build/extended-audit/results.json
+            build/extended-audit/handoff.tsv
             build/extended-audit/*-render.png
           if-no-files-found: warn
           retention-days: 30

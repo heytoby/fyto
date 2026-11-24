@@ -2532,6 +2532,15 @@ static void _viv_free_directory(_viv_directory_t *directory)
 static void _viv_retain_display_before_load(const WIN32_FIND_DATA *target)
 {
     _viv_preview_t display={0};WIN32_FIND_DATA shown;
+    const char *audit=getenv("FYTO_AUDIT_HANDOFF");
+    if(audit && *audit){
+        FILE *file=fopen(audit,"ab");
+        if(file){fprintf(file,"%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+            _viv_frame_count,_viv_frame_loaded_count,_viv_1to1,_viv_zoom_pos,
+            _viv_view_x,_viv_view_y,_viv_image_wide,_viv_image_high,
+            _viv_frames && _viv_frames[0].mipmap!=NULL);fclose(file);}
+    }
+
     if(!_viv_frames || _viv_frame_count!=1 || _viv_frame_loaded_count!=1 ||
         _viv_preview.hbitmap || _viv_is_slideshow || _viv_1to1 || _viv_zoom_pos || _viv_view_x || _viv_view_y ||
         _viv_same_image(_viv_frame_fd,target) ||
@@ -12228,14 +12237,38 @@ static DWORD WINAPI _viv_load_image_thread_proc(void *param)
 		h = CreateFile(job->filename,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|((os_major_version >= 5) ? FILE_SHARE_DELETE : 0),0,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,0);
 		if (h != INVALID_HANDLE_VALUE)
 		{
-            DWORD size,high=0,peeked=0;BYTE signature[3];LARGE_INTEGER zero={0};
+            DWORD size,high=0,peeked=0;BYTE signature[33];LARGE_INTEGER zero={0};
             HANDLE global_handle;
             BOOL rewind_ok;
-            if(ReadFile(h,signature,sizeof(signature),&peeked,NULL) && peeked==3 &&
+            if(ReadFile(h,signature,sizeof(signature),&peeked,NULL) && peeked>=3 &&
                 signature[0]==0xff && signature[1]==0xd8 && signature[2]==0xff){
                 jpeg_file=TRUE;
                 stream=fyto_file_stream_take(h,_viv_load_discarded,job);
                 if(stream)h=INVALID_HANDLE_VALUE;
+            }
+            if(h!=INVALID_HANDLE_VALUE && peeked>=24 &&
+                !memcmp(signature,"\211PNG\r\n\032\n",8) &&
+                _viv_loading_in_background(job) &&
+                (UINT64)fyto_png_u32(signature+16)*fyto_png_u32(signature+20)>job->prefetch_pixels){
+                job->preview_only=TRUE;ret=1;CloseHandle(h);h=INVALID_HANDLE_VALUE;
+            }
+            if(h!=INVALID_HANDLE_VALUE && peeked>=4 &&
+                ((!memcmp(signature,"II\052\0",4)) || (!memcmp(signature,"MM\0\052",4)))){
+                stream=fyto_file_stream_take(h,_viv_load_discarded,job);
+                if(stream){
+                    h=INVALID_HANDLE_VALUE;
+                    if(_viv_loading_in_background(job)){
+                        fyto_wic_image header={0};WICPixelFormatGUID format;UINT frames=1;
+                        if(fyto_wic_open(&header,&CLSID_WICTiffDecoder,stream,&format)){
+                            IWICBitmapDecoder_GetFrameCount(header.decoder,&frames);
+                            if(!_viv_cache_image_fits(header.wide,header.high,frames)){
+                                job->preview_only=TRUE;ret=1;
+                            }
+                        }
+                        fyto_wic_close(&header);
+                    }
+                    stream->lpVtbl->Seek(stream,zero,STREAM_SEEK_SET,NULL);
+                }
             }
             rewind_ok=h!=INVALID_HANDLE_VALUE && SetFilePointerEx(h,zero,NULL,FILE_BEGIN);
             if(!jpeg_file && rewind_ok){
