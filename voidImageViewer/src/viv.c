@@ -2525,6 +2525,27 @@ static void _viv_free_directory(_viv_directory_t *directory)
     mem_free(directory);
 }
 
+/* Keep the already rendered picture while releasing a large original before
+   the next foreground decode. Retaining both originals plus compressed input
+   caused the mixed-format memory spike. Zoomed views and same-file detail
+   requests keep their original pixels. */
+static void _viv_retain_display_before_load(const WIN32_FIND_DATA *target)
+{
+    _viv_preview_t display={0};WIN32_FIND_DATA shown;
+    if(!_viv_frames || _viv_frame_count!=1 || _viv_frame_loaded_count!=1 ||
+        _viv_preview.hbitmap || _viv_is_slideshow || _viv_1to1 || _viv_zoom_pos ||
+        _viv_same_image(_viv_frame_fd,target) ||
+        (UINT64)_viv_image_wide*_viv_image_high*4<=FYTO_CACHE_TOTAL_BYTES)return;
+    if(!_viv_render_restore(_viv_frame_fd,&display))return;
+    shown=*_viv_frame_fd;
+    _viv_clear();
+    _viv_preview=display;
+    _viv_image_wide=display.image_wide;
+    _viv_image_high=display.image_high;
+    *_viv_frame_fd=shown;
+    _viv_process_pending_clear();
+}
+
 static void _viv_open(WIN32_FIND_DATA *fd,int is_preload)
 {
     _viv_preview_t cached = {0};
@@ -2710,7 +2731,8 @@ debug_printf("CURRENTLY LOADING %S preload %d\n",_viv_load_image_filename,_viv_l
 	{
 		DWORD thread_id;
 		RECT rect;
-        _viv_load_job_t *job = mem_alloc(sizeof(*job));
+        _viv_load_job_t *if(!is_preload)_viv_retain_display_before_load(fd);
+        job = mem_alloc(sizeof(*job));
 
 		_viv_viewport_rect(&rect);
 
