@@ -13,8 +13,36 @@ $sdkRoot=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10'
 $sdk=(Get-ChildItem (Join-Path $sdkRoot 'Lib') -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
 if(!$sdk){throw 'A versioned Windows SDK is required'}
 & (Join-Path $root 'scripts/Build-Jpeg.ps1') -Root $root
+& $msbuild (Join-Path $root 'tests/association_path.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Association identity test build failed'}
+& (Join-Path $root 'build/association-tests/test_association_path.exe')
+if($LASTEXITCODE -ne 0){throw 'Association identity regression failed'}
+& $msbuild (Join-Path $root 'tests/file_stream.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'File stream test build failed'}
+& (Join-Path $root 'build/file-stream-tests/test_file_stream.exe')
+if($LASTEXITCODE -ne 0){throw 'File stream regression failed'}
+& $msbuild (Join-Path $root 'tests/icc_cancel.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'ICC cancellation test build failed'}
+& (Join-Path $root 'build/icc-cancel-tests/test_icc_cancel.exe')
+if($LASTEXITCODE -ne 0){throw 'ICC cancellation regression failed'}
 & python (Join-Path $root 'tests/test_playback_contract.py')
 if($LASTEXITCODE -ne 0){throw 'Playback contract check failed'}
+& python (Join-Path $root 'tests/prepare_navigation_test.py')
+if($LASTEXITCODE -ne 0){throw 'Navigation test preparation failed'}
+& $msbuild (Join-Path $root 'tests/navigation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Navigation test build failed'}
+& (Join-Path $root 'build/navigation-tests/test_navigation.exe')
+if($LASTEXITCODE -ne 0){throw 'Navigation regression failed'}
+& python (Join-Path $root 'tests/test_preview_cache.py')
+if($LASTEXITCODE -ne 0){throw 'Cache test preparation failed'}
+& $msbuild (Join-Path $root 'tests/preview_cache.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Cache test build failed'}
+& (Join-Path $root 'build/cache-tests/test_preview_cache.exe')
+if($LASTEXITCODE -ne 0){throw 'Cache regression failed'}
+& $msbuild (Join-Path $root 'tests/orientation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
+if($LASTEXITCODE -ne 0){throw 'Orientation test build failed'}
+& (Join-Path $root 'build/orientation-tests/test_bitmap_orientation.exe')
+if($LASTEXITCODE -ne 0){throw 'Orientation regression failed'}
 & python (Join-Path $root 'tests/prepare_presentation_test.py')
 if($LASTEXITCODE -ne 0){throw 'Presentation test preparation failed'}
 & $msbuild (Join-Path $root 'tests/presentation.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk"
@@ -29,8 +57,15 @@ if($LASTEXITCODE -ne 0){throw 'Primary display regression check failed'}
 if($LASTEXITCODE -ne 0){throw 'JPEG test build failed'}
 & python (Join-Path $root 'tests/verify_jpeg_decode.py') (Join-Path $root 'build/jpeg-tests/test_jpeg_decode.exe')
 if($LASTEXITCODE -ne 0){throw 'JPEG decoding regression'}
+& $msbuild (Join-Path $root 'tests/icc_profile.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
+if($LASTEXITCODE -ne 0){throw 'ICC profile test build failed'}
+& python (Join-Path $root 'tests/verify_icc_profiles.py') (Join-Path $root 'build/icc-profile-tests/test_icc.exe')
+if($LASTEXITCODE -ne 0){throw 'ICC profile pixel regression failed'}
+
 & $msbuild (Join-Path $root 'voidImageViewer/vs2019/voidImageViewer.vcxproj') /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 /p:TargetName=fyto "/p:PlatformToolset=$Toolset" "/p:WindowsTargetPlatformVersion=$sdk" "/p:ForceImportBeforeCppTargets=$root/build-overrides.targets"
 if($LASTEXITCODE -ne 0){throw 'Viewer build failed'}
+& python (Join-Path $root 'tests/test_fyto_order.py') (Join-Path $root 'voidImageViewer/vs2019/x64/Release/fyto.exe')
+if($LASTEXITCODE -ne 0){throw 'Native viewer navigation regression failed'}
 $build=Join-Path $root 'build';$payload=Join-Path $build 'payload';$out=Join-Path $root 'release-assets'
 New-Item -ItemType Directory -Force $payload,$out | Out-Null
 Copy-Item (Join-Path $root 'voidImageViewer/vs2019/x64/Release/fyto.exe') $payload

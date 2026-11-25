@@ -132,6 +132,7 @@ static void _viv_viewport_rect(RECT *r){int w=fake_window.right-fake_window.left
 static const wchar_t *string_get_filename_part(const wchar_t *p){const wchar_t *last=wcsrchr(p,L'\\');return last?last+1:p;}
 static unsigned long long os_get_tick_count(void){return 100;}
 static void _viv_timer_start(void){}
+static void _viv_complete_detail_actions(void){}
 static void _viv_update_src_pixel(int a,int b){(void)a;(void)b;}
 static void _viv_status_update(void){}
 static void _viv_update_1to1_scroll(int x,int y){(void)x;(void)y;}
@@ -194,6 +195,8 @@ static void _viv_status_show(int show){(void)show;}
 static void _viv_controls_show(int show){(void)show;}
 #include "../build/presentation-under-test.h"
 
+#define mem_alloc malloc
+#define mem_free free
 #include "../build/mipmap-under-test.h"
 
 static void verify_top_down_mipmap(void)
@@ -222,6 +225,15 @@ static void verify_top_down_mipmap(void)
     assert(half && GetObject(half, sizeof(result), &result) == sizeof(result));
     assert(result.dsBm.bmWidth == 5 && result.dsBm.bmHeight == 2);
     assert(!memcmp(result.dsBm.bmBits, expected, sizeof(expected)));
+    DeleteObject(half);
+    half=fyto_image_dib(9,3,32,NULL);
+    assert(half && _viv_box_scale(full,9,3,half,9,3,TRUE));
+    assert(GetObject(half,sizeof(result),&result));
+    for(y=0;y<3;y++)for(x=0;x<9;x++)
+        assert(((DWORD *)result.dsBm.bmBits)[y*9+x]==(row[y*9+x]&0xffffff));
+    assert(_viv_box_scale(full,9,3,half,9,3,FALSE));
+    for(y=0;y<3;y++)for(x=0;x<9;x++)
+        assert(((DWORD *)result.dsBm.bmBits)[y*9+x]==(row[(2-y)*9+x]&0xffffff));
     DeleteObject(half);
     DeleteObject(full);
 }

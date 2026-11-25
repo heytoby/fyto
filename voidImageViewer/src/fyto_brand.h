@@ -1,4 +1,4 @@
-﻿#include "fyto_formats.h"
+#include "fyto_formats.h"
 // fyto presentation; opaque rectangular frame, without glass extension or a DWM shadow.
 static void fyto_window_finish(HWND hwnd,int flat)
 {
@@ -6,6 +6,11 @@ static void fyto_window_finish(HWND hwnd,int flat)
     typedef HRESULT (WINAPI *extend_t)(HWND,const int *);
     static HMODULE module; static set_attr_t attr; static extend_t extend; static HWND configured;
     int corners=1,policy=1,margins[4]={0,0,0,0};
+    // DWM paints its own 1 px window border on top of the client edge on some
+    // Windows 11 builds; DWMWA_COLOR_NONE suppresses it while WS_THICKFRAME
+    // (and therefore edge resizing) stays. This is not a border colour: a
+    // colour is what used to produce the black edge regression.
+    DWORD border_color=0xFFFFFFFE;
     {
         static HWND region_hwnd; static int rw,rh,busy; RECT rect;
         if(hwnd && !busy && GetWindowRect(hwnd,&rect)) {
@@ -20,7 +25,7 @@ static void fyto_window_finish(HWND hwnd,int flat)
     if(!hwnd || hwnd==configured)return;
     configured=hwnd;
     if(!module){module=LoadLibraryW(L"dwmapi.dll");if(module){attr=(set_attr_t)GetProcAddress(module,"DwmSetWindowAttribute");extend=(extend_t)GetProcAddress(module,"DwmExtendFrameIntoClientArea");}}
-    if(attr){attr(hwnd,33,&corners,sizeof(corners));attr(hwnd,2,&policy,sizeof(policy));}
+    if(attr){attr(hwnd,33,&corners,sizeof(corners));attr(hwnd,2,&policy,sizeof(policy));attr(hwnd,34,&border_color,sizeof(border_color));}
     if(flat)margins[0]=margins[1]=margins[2]=margins[3]=0;
     if(extend)extend(hwnd,margins);
 }
@@ -52,6 +57,6 @@ static void fyto_first_run(HWND owner)
     DWORD selected=0;
     fyto_startup_complete=1;
     fyto_offer_formats=!fyto_read_association_value(L"SelectedFormats",&selected);
-    if(fyto_formats_requested)fyto_format_dialog(owner);
+    if(fyto_formats_requested && (!fyto_formats_auto || fyto_missing_format_count()))fyto_format_dialog(owner);
     InvalidateRect(owner,NULL,FALSE);
 }

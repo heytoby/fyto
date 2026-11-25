@@ -55,7 +55,7 @@ static INT_PTR CALLBACK fyto_licenses_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM l
 static INT_PTR CALLBACK _viv_about_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
 {
     switch(msg){
-        case WM_INITDIALOG:{wchar_t version[96];l10n_dialog(hwnd);
+        case WM_INITDIALOG:{fyto_window_frame_color(hwnd,GetSysColor(COLOR_WINDOW));wchar_t version[96];l10n_dialog(hwnd);
             SetWindowTextW(hwnd,config_language?L"关于 fyto":L"About fyto");
             string_printf(version,"fyto %d.%d.%d.%d%s %s",VERSION_MAJOR,VERSION_MINOR,VERSION_REVISION,VERSION_BUILD,VERSION_TYPE,VERSION_TARGET_MACHINE);
             SetDlgItemTextW(hwnd,IDC_ABOUTVERSION,version);
@@ -66,7 +66,7 @@ static INT_PTR CALLBACK _viv_about_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
             SetDlgItemTextW(hwnd,IDOK,config_language?L"确定":L"OK");fyto_about_load();fyto_about_layout(hwnd);return TRUE;
         }
         case WM_DRAWITEM:{DRAWITEMSTRUCT *item=(DRAWITEMSTRUCT *)lp;void *graphics=NULL;if(item->CtlID!=60010)break;
-            FillRect(item->hDC,&item->rcItem,(HBRUSH)GetStockObject(WHITE_BRUSH));
+            FillRect(item->hDC,&item->rcItem,(HBRUSH)(COLOR_WINDOW+1));
             if(fyto_about_image && os_GdipCreateFromHDC && os_GdipDrawImageRectI && os_GdipDeleteGraphics && os_GdipCreateFromHDC(item->hDC,&graphics)==0){
                 int w=item->rcItem.right-item->rcItem.left,h=item->rcItem.bottom-item->rcItem.top,dw=w,dh=MulDiv(w,fyto_about_height,fyto_about_width);
                 if(dh>h){dh=h;dw=MulDiv(h,fyto_about_width,fyto_about_height);}
@@ -74,8 +74,8 @@ static INT_PTR CALLBACK _viv_about_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp)
                 os_GdipDrawImageRectI(graphics,fyto_about_image,item->rcItem.left+(w-dw)/2,item->rcItem.top+(h-dh)/2,dw,dh);os_GdipDeleteGraphics(graphics);
             }return TRUE;
         }
-        case WM_CTLCOLORSTATIC:SetTextColor((HDC)wp,RGB(32,32,32));SetBkColor((HDC)wp,RGB(255,255,255));return (INT_PTR)GetStockObject(WHITE_BRUSH);
-        case WM_PAINT:{PAINTSTRUCT ps;RECT r;BeginPaint(hwnd,&ps);GetClientRect(hwnd,&r);FillRect(ps.hdc,&r,(HBRUSH)GetStockObject(WHITE_BRUSH));EndPaint(hwnd,&ps);return TRUE;}
+        case WM_CTLCOLORSTATIC:SetTextColor((HDC)wp,RGB(32,32,32));SetBkColor((HDC)wp,GetSysColor(COLOR_WINDOW));return (INT_PTR)(COLOR_WINDOW+1);
+        case WM_PAINT:{PAINTSTRUCT ps;RECT r;BeginPaint(hwnd,&ps);GetClientRect(hwnd,&r);FillRect(ps.hdc,&r,(HBRUSH)(COLOR_WINDOW+1));EndPaint(hwnd,&ps);return TRUE;}
         case WM_COMMAND:switch(LOWORD(wp)){
             case IDC_ABOUTEMAIL:DialogBoxParamW(os_hinstance,MAKEINTRESOURCEW(60011),hwnd,fyto_licenses_proc,0);return TRUE;
             case IDOK:case IDCANCEL:EndDialog(hwnd,0);return TRUE;

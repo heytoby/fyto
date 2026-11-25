@@ -22,6 +22,8 @@ static void title_release_fonts(void)
     if (title_menu_font)DeleteObject(title_menu_font);
     title_font=title_menu_font=NULL;
 }
+// The viewer keeps its dark canvas, but its dialogs should not inherit the
+// system dark title bar (they read as a black band above the sheet).
 static void title_paint(HWND hwnd)
 {
     RECT wr,cr,r,bar;

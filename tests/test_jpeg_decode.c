@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdio.h>
 #include "../voidImageViewer/src/fast_jpeg.h"
+#include "../voidImageViewer/src/file_stream.h"
 
 static BOOL cancel_decode(void *context)
 {
@@ -109,6 +110,45 @@ int wmain(int argc, wchar_t **argv)
         if (fast) DeleteObject(fast);
         fast = fyto_jpeg_decode_pixels(input, min(32, jpeg.input_size), jpeg.wide, jpeg.high, 1, 32, &w, &h, NULL, NULL);
         if (fast) { DeleteObject(fast); failed = 1; }
+        {
+            HANDLE handle=CreateFileW(argv[i],GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+                NULL,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,NULL);
+            IStream *file_stream=NULL,*truncated=NULL;
+            fyto_wic_image file_jpeg={0};
+            if(handle==INVALID_HANDLE_VALUE)return 5;
+            file_stream=fyto_file_stream_take(handle,NULL,NULL);
+            if(!file_stream){CloseHandle(handle);return 6;}
+            fyto_jpeg_set_input(&file_jpeg,file_stream,NULL,NULL);
+            if(!file_jpeg.input_stream || !fyto_jpeg_open(&file_jpeg,file_stream,TRUE))return 7;
+            fast=fyto_jpeg_full(&file_jpeg,orientation,&w,&h);
+            reference=fyto_jpeg_full(&jpeg,orientation,&w,&h);
+            if(!compare(fast,reference))failed=1;
+            if(fast)DeleteObject(fast);if(reference)DeleteObject(reference);
+            fast=fyto_jpeg_preview(&file_jpeg,1024,&w,&h);
+            reference=fyto_jpeg_preview(&jpeg,1024,&w,&h);
+            {
+                WICPixelFormatGUID format;
+                IWICBitmapFrameDecode_GetPixelFormat(file_jpeg.frame,&format);
+                if(!reference && IsEqualGUID(&format,&GUID_WICPixelFormat8bppGray)){
+                    if(!gray_preview(fast,file_jpeg.wide,file_jpeg.high))failed=1;
+                }else if(!compare(fast,reference))failed=1;
+            }
+            if(fast)DeleteObject(fast);if(reference)DeleteObject(reference);
+            calls=0;
+            fast=fyto_jpeg_decode_stream(file_jpeg.input_stream,file_jpeg.wide,file_jpeg.high,
+                1,32,&w,&h,cancel_decode,&calls);
+            if(fast || calls<6)failed=1;
+            if(fast)DeleteObject(fast);
+            if(FAILED(CreateStreamOnHGlobal(NULL,TRUE,&truncated)))return 8;
+            {
+                ULONG written=0;
+                if(FAILED(truncated->lpVtbl->Write(truncated,input,(ULONG)min(32,jpeg.input_size),&written)))return 9;
+            }
+            fast=fyto_jpeg_decode_stream(truncated,file_jpeg.wide,file_jpeg.high,1,32,&w,&h,NULL,NULL);
+            if(fast){DeleteObject(fast);failed=1;}
+            truncated->lpVtbl->Release(truncated);
+            fyto_wic_close(&file_jpeg);file_stream->lpVtbl->Release(file_stream);
+        }
         printf("JPEG_CASE %ls orientation=%d cancelled=%d result=%d\n", argv[i], orientation, calls, failed);
         fyto_wic_close(&jpeg);
         IStream_Release(stream);

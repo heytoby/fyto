@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright 2025 voidtools / David Carpenter
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -221,6 +221,7 @@ enum
 	VIV_ID_VIEW_REFRESH,
 	VIV_ID_VIEW_CAPTION,
 	VIV_ID_VIEW_THICKFRAME,
+	VIV_ID_OPTIONS_ABOUT,
 };
 
 #include "version.h"

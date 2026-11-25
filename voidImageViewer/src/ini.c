@@ -59,6 +59,10 @@ typedef struct _ini_s
 static int _ini_keyvalue_compare(const _ini_keyvalue_t *a,const _ini_keyvalue_t *b);
 static _ini_keyvalue_t *_ini_keyvalue_find(ini_t *ini,const utf8_t *key);
 
+// A settings file is a few KB. Anything larger is not something we wrote, so it
+// is refused instead of being read into memory and parsed.
+#define _INI_MAX_FILE_SIZE	(64 * 1024 * 1024)
+
 ini_t *ini_open(const wchar_t *filename,const utf8_t *ascii_section)
 {
 	ini_t *ini;
@@ -78,7 +82,20 @@ ini_t *ini_open(const wchar_t *filename,const utf8_t *ascii_section)
 		DWORD size;
 
 		size = GetFileSize(h,0);
-		
+
+		// GetFileSize reports INVALID_FILE_SIZE (0xFFFFFFFF) for a file over
+		// 4 GiB. Trusting that value would size the buffer from a wrapped
+		// size + 1 while ReadFile still asked for 0xFFFFFFFF bytes.
+		if (size == INVALID_FILE_SIZE)
+		{
+			debug_printf("ini: cannot size %S, ignoring it.\n",filename);
+		}
+		else
+		if (size > _INI_MAX_FILE_SIZE)
+		{
+			debug_printf("ini: %S is %u bytes, above the %u byte limit, ignoring it.\n",filename,size,_INI_MAX_FILE_SIZE);
+		}
+		else
 		if (size)
 		{
 			char *buf;

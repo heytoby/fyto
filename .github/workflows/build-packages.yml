@@ -27,8 +27,29 @@ jobs:
           python -m pip install --disable-pip-version-check --quiet pillow
           if ($LASTEXITCODE) { throw 'Pillow is required for image regression tests' }
       - name: Build and verify the Windows installer
+        id: build
         shell: pwsh
         run: ./scripts/Build-Release.ps1
+      - name: Audit actual paint latency and 1000 image transitions
+        shell: pwsh
+        run: python tests/audit_runtime.py
+      - name: Check native formats, animation, replaced files and large directories
+        if: ${{ !cancelled() && steps.build.conclusion == 'success' }}
+        shell: pwsh
+        run: python tests/audit_extended.py
+      - name: Preserve raw audit evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fyto-runtime-audit
+          path: |
+            build/audit-runtime/*
+            build/icc-profile-audit/results.json
+            build/extended-audit/results.json
+            build/extended-audit/handoff.tsv
+            build/extended-audit/*-render.png
+          if-no-files-found: warn
+          retention-days: 30
       - name: Verify MSI uses the registered install directory and preserves settings
         shell: pwsh
         run: |
@@ -83,3 +104,57 @@ jobs:
             release-assets/fyto-*-macos-universal.dmg
           if-no-files-found: error
           retention-days: 30
+
+  deliver:
+    name: Publish downloadable test build
+    needs: [windows, macos]
+    if: github.ref == 'refs/heads/build/fyto-audit-20261122' && startsWith(github.event.head_commit.message, 'deliver:')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyto-Windows-x64
+          path: delivery
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyto-macOS-Universal
+          path: delivery
+      - name: Verify packages and publish the test release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd delivery
+          test -s fyto-Setup-1.0.0.71.exe
+          test -s fyto-Setup-1.0.0.71.msi
+          test -s fyto-1.0.0.71-macos-universal.dmg
+          sed -i 's/\r$//' SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+          sha256sum fyto-Setup-1.0.0.71.exe fyto-Setup-1.0.0.71.msi fyto-1.0.0.71-macos-universal.dmg > DELIVERY-SHA256SUMS.txt
+          cat > RELEASE-NOTES.txt <<'NOTES'
+          fyto 1.0.0.71 测试版
+
+          Windows EXE/MSI 支持覆盖旧版安装；macOS 提供通用 DMG。
+          本版包含浏览调度、导航顺序、文件缓存、混合格式内存峰值、JPEG/TIFF流式读取、ICC取消、ICO及默认关联识别修复。
+          发布前必须通过 Windows/macOS 构建、Windows 安装检查和36项后台验收，检查失败不会发布。
+
+          本版为测试交付。高分辨率、多显示器/DPI、真实照片、打印/旋转、实际系统关联及应用内更新等完整实机矩阵仍未验收。
+          主显示器、鼠标和用户本机安装未被操作。此测试版不替换稳定版更新通道。
+          NOTES
+          tag='v1.0.0.71-rc.1'
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'This test release already exists; refusing to replace published files.' >&2
+            exit 1
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title 'fyto 1.0.0.71 测试版' --notes-file RELEASE-NOTES.txt \
+            fyto-Setup-1.0.0.71.exe fyto-Setup-1.0.0.71.msi fyto-Setup-1.0.0.71.zip fyto-source-1.0.0.71.zip \
+            fyto-1.0.0.71-macos-universal.dmg fyto-1.0.0.71-macos-universal.zip DELIVERY-SHA256SUMS.txt
+          for file in fyto-Setup-1.0.0.71.exe fyto-Setup-1.0.0.71.msi fyto-1.0.0.71-macos-universal.dmg; do
+            curl --head --fail --silent --show-error --location --retry 3 --retry-delay 2 --retry-all-errors \
+              --connect-timeout 10 --max-time 30 "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$file" >/dev/null
+          done
