@@ -45,6 +45,19 @@ jobs:
           "FYTO_BANDIVIEW_DIR=$target" >> $env:GITHUB_ENV
           "FYTO_BANDIVIEW_VERSION=$((Get-Item "$target/BandiView.exe").VersionInfo.FileVersion)" >> $env:GITHUB_ENV
           Get-FileHash $setup
+      - name: Build isolated native JPEG stage probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if(!(Get-Command nasm -ErrorAction SilentlyContinue) -and !(Test-Path 'C:/Program Files/NASM/nasm.exe')){
+            choco install nasm --version=2.16.03 --yes --no-progress
+            if($LASTEXITCODE){throw 'NASM setup failed'}
+          }
+          ./scripts/Build-Jpeg.ps1 -Root $pwd
+          $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $msbuild=& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          & $msbuild tests/probe_jpeg_stages.vcxproj /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:ForceImportBeforeCppTargets=$pwd/build-overrides.targets"
+          if($LASTEXITCODE){throw 'Native profiling build failed'}
       - name: Compare actual rendered target latency in ABCCBA order
         shell: pwsh
         run: python tests/compare_released_52.py
@@ -52,5 +65,7 @@ jobs:
         if: always()
         with:
           name: fyto-52-71-comparison
-          path: build/compare52/results.json
+          path: |
+            build/compare52/results.json
+            build/compare52/jpeg-stages.txt
           if-no-files-found: warn

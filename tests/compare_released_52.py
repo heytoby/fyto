@@ -18,6 +18,11 @@ for i in range(24):
     manifest.append({'file':path.name,'bytes':path.stat().st_size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'progressive':i%3==0})
     del im,draw
     print('Fixture',i,manifest[-1]['bytes'],flush=True)
+probe=root/'build/jpeg-tests/probe_jpeg_stages.exe'
+if probe.exists():
+    result=subprocess.run([str(probe),*[str(fixtures/f'{i:03}.jpg') for i in range(3)]],capture_output=True,text=True,check=True)
+    print(result.stdout,flush=True)
+    (out/'jpeg-stages.txt').write_text(result.stdout)
 def wait(fn,seconds=20):
     end=time.perf_counter()+seconds
     while time.perf_counter()<end:
