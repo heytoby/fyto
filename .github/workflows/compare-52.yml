@@ -1,4 +1,4 @@
-name: Compare released 52 and 71
+name: Compare fyto with BandiView
 on:
   push:
     branches: ['perf/fyto-52-comparison']
@@ -30,7 +30,22 @@ jobs:
           }
           python -m pip install --quiet pillow
           if($LASTEXITCODE){throw 'Pillow installation failed'}
-      - name: Compare actual rendered target latency in ABBA order
+      - name: Prepare official BandiView trial on isolated runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $setup=Join-Path $env:RUNNER_TEMP 'bandiview-setup.exe'
+          Invoke-WebRequest 'https://bandisoft.app/bandiview/BANDIVIEW-SETUP-X64.EXE?20261103091858' -OutFile $setup
+          $sig=Get-AuthenticodeSignature $setup
+          if($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Bandisoft'){throw 'Vendor signature validation failed'}
+          $target=Join-Path $env:RUNNER_TEMP 'bandiview-compare'
+          $p=Start-Process $setup -ArgumentList "/S /D:`"$target`"" -WindowStyle Hidden -Wait -PassThru
+          if($p.ExitCode -ne 0){throw 'Vendor silent install failed'}
+          if(!(Test-Path "$target/BandiView.exe")){throw 'Vendor executable missing'}
+          "FYTO_BANDIVIEW_DIR=$target" >> $env:GITHUB_ENV
+          "FYTO_BANDIVIEW_VERSION=$((Get-Item "$target/BandiView.exe").VersionInfo.FileVersion)" >> $env:GITHUB_ENV
+          Get-FileHash $setup
+      - name: Compare actual rendered target latency in ABCCBA order
         shell: pwsh
         run: python tests/compare_released_52.py
       - uses: actions/upload-artifact@v4

@@ -1,5 +1,5 @@
 """Compare the exact released binaries on one disposable CI desktop."""
-import os,sys,json,time,subprocess,hashlib,random,math,ctypes as c,ctypes.wintypes as w
+import os,sys,json,time,subprocess,hashlib,random,math,atexit,ctypes as c,ctypes.wintypes as w
 from pathlib import Path
 from PIL import Image,ImageDraw
 from window_test_helpers import u,g,wins,label
@@ -17,12 +17,13 @@ for i in range(24):
     path=fixtures/(f'{i:03}.jpg');im.save(path,quality=95,progressive=i%3==0)
     manifest.append({'file':path.name,'bytes':path.stat().st_size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'progressive':i%3==0})
     del im,draw
+    print('Fixture',i,manifest[-1]['bytes'],flush=True)
 def wait(fn,seconds=20):
     end=time.perf_counter()+seconds
     while time.perf_counter()<end:
         if fn():return time.perf_counter()
         time.sleep(.001)
-    raise AssertionError('timeout')
+    raise AssertionError('timeout: '+str([(name,label(handle)) for handle,name in wins(p.pid)]))
 def pixel_ready(h,index):
     if f'{index:03}.jpg' not in label(h):return False
     r=w.RECT();u.GetClientRect(h,c.byref(r))
@@ -40,18 +41,28 @@ def pixel_ready(h,index):
     finally:u.ReleaseDC(h,dc)
 def percentile(xs,p):return sorted(xs)[max(0,math.ceil(len(xs)*p)-1)]
 runs=[]
-for order,version in enumerate(['52','71','71','52']):
-    folder=root/'build'/('released-'+version)
-    candidates=list(folder.rglob('fyto.exe'));assert len(candidates)==1,candidates
+errors=[]
+def save_results():
+    save_results()
+    # (out/'results.json').write_text(json.dumps({'scope':'Exact released fyto binaries and official unlicensed BandiView trial on the same CI desktop, OS cache warm; complex 24MP JPEGs; first correct target pixels, not full-detail, real photos or physical scanout','display':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':manifest,'runs':runs,'errors':errors,'vendor_version':os.getenv('FYTO_BANDIVIEW_VERSION')},indent=2))
+atexit.register(save_results)
+def record_error(t,v,tb):
+    errors.append(str(v));save_results();sys.__excepthook__(t,v,tb)
+sys.excepthook=record_error
+for order,version in enumerate(['52','71','bandiview','bandiview','71','52']):
+    vendor=version=='bandiview'
+    folder=Path(os.environ['FYTO_BANDIVIEW_DIR']) if vendor else root/'build'/('released-'+version)
+    candidates=list(folder.rglob('BandiView.exe' if vendor else 'fyto.exe'));assert len(candidates)==1,candidates
     exe=candidates[0]
     # No inherited user settings and the same explicit configuration.
-    (exe.parent/'fyto.ini').write_text('[fyto]\nappdata=0\nmultiple_instances=1\ndefaults_version=5\nshow_caption=0\nshow_menu=0\nshow_status=0\nshow_controls=0\nshow_thickframe=0\nmouse_wheel_action=1\nnav_sort=0\nnav_sort_ascending=1\npreload_next=1\ncache_last=1\n',encoding='ascii')
-    (exe.parent/'associations.ini').write_text('[fyto]\nSetupVersion=1\n',encoding='ascii')
+    if not vendor:(exe.parent/'fyto.ini').write_text('[fyto]\nappdata=0\nmultiple_instances=1\ndefaults_version=5\nshow_caption=0\nshow_menu=0\nshow_status=0\nshow_controls=0\nshow_thickframe=0\nmouse_wheel_action=1\nnav_sort=0\nnav_sort_ascending=1\npreload_next=1\ncache_last=1\n',encoding='ascii')
+    if not vendor:(exe.parent/'associations.ini').write_text('[fyto]\nSetupVersion=1\n',encoding='ascii')
     samples=[];p=None;h=None;t=time.perf_counter()
     try:
-        p=subprocess.Popen([str(exe.resolve()),'/window',str((fixtures/'000.jpg').resolve())],cwd=exe.parent)
-        wait(lambda:any(n=='fyto' for _,n in wins(p.pid)))
-        h=next(h for h,n in wins(p.pid) if n=='fyto')
+        args=['-fullscreen','-mode:fit2window'] if vendor else ['/fullscreen']
+        p=subprocess.Popen([str(exe.resolve()),*args,str((fixtures/'000.jpg').resolve())],cwd=exe.parent)
+        wait(lambda:any('000.jpg' in label(handle) for handle,_ in wins(p.pid)))
+        h=next(handle for handle,_ in wins(p.pid) if '000.jpg' in label(handle))
         end=wait(lambda:pixel_ready(h,0));startup=(end-t)*1000
         time.sleep(.4);index=0
         def step(target,delay,phase):
