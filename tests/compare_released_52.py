@@ -35,21 +35,22 @@ def pixel_ready(h,index):
     dc=u.GetDC(h)
     try:
         expected=colors[index]
-        # Both binaries must have painted the target, not merely changed the title.
-        for px,py in [(.5,.5),(.25,.25),(.75,.75)]:
-            scale=min(r.right/6000,r.bottom/4000)
-            x=int((r.right-6000*scale)/2+6000*scale*px)
-            y=int((r.bottom-4000*scale)/2+4000*scale*py)
-            value=g.GetPixel(dc,x,y);actual=(value&255,(value>>8)&255,(value>>16)&255)
-            if max(abs(a-b) for a,b in zip(actual,expected))>14:return False
-        return True
+        # Trial chrome may offset the picture vertically. Verify the unique
+        # target marker in actual pixels, using the identical scan for all apps.
+        matches=0
+        for i in range(8,57):
+            value=g.GetPixel(dc,r.right//2,int(r.bottom*i/64))
+            actual=(value&255,(value>>8)&255,(value>>16)&255)
+            if max(abs(a-b) for a,b in zip(actual,expected))<=14:
+                matches+=1
+                if matches>=3:return True
+        return False
     finally:u.ReleaseDC(h,dc)
 def percentile(xs,p):return sorted(xs)[max(0,math.ceil(len(xs)*p)-1)]
 runs=[]
 errors=[]
 def save_results():
-    save_results()
-    # (out/'results.json').write_text(json.dumps({'scope':'Exact released fyto binaries and official unlicensed BandiView trial on the same CI desktop, OS cache warm; complex 24MP JPEGs; first correct target pixels, not full-detail, real photos or physical scanout','display':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':manifest,'runs':runs,'errors':errors,'vendor_version':os.getenv('FYTO_BANDIVIEW_VERSION')},indent=2))
+    (out/'results.json').write_text(json.dumps({'scope':'Exact released fyto binaries and official unlicensed BandiView trial on the same CI desktop, OS cache warm; complex 24MP JPEGs; first correct target pixels, not full-detail, real photos or physical scanout','display':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':manifest,'runs':runs,'errors':errors,'vendor_version':os.getenv('FYTO_BANDIVIEW_VERSION')},indent=2))
 atexit.register(save_results)
 def record_error(t,v,tb):
     errors.append(str(v));save_results();sys.__excepthook__(t,v,tb)
