@@ -13,7 +13,7 @@ int wmain(int argc,wchar_t **argv){
  int i,j;CoInitializeEx(NULL,COINIT_APARTMENTTHREADED);
  for(i=1;i<argc;i++)for(j=0;j<3;j++){
   HANDLE file=CreateFileW(argv[i],GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,NULL,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,NULL);
-  IStream *stream;fyto_wic_image jpeg={0};HBITMAP bitmap;UINT w,h;double a,b,d,e,raw;
+  IStream *stream;fyto_wic_image jpeg={0};HBITMAP bitmap;UINT w,h;double a,b,d,e,raw,wic;
   if(file==INVALID_HANDLE_VALUE)return 2;
   stream=fyto_file_stream_take(file,NULL,NULL);if(!stream)return 3;
   a=stamp();
@@ -27,7 +27,13 @@ int wmain(int argc,wchar_t **argv){
   fyto_jpeg_orientation(&jpeg);d=stamp();
   bitmap=fyto_jpeg_decode_image(&jpeg,6000,4000,4,32,&w,&h,NULL,NULL);
   e=stamp();if(!bitmap)return 6;DeleteObject(bitmap);
-  printf("JPEG_STAGE file=%ls round=%d metadata_ms=%.4f orientation_ms=%.4f turbo_decode_ms=%.4f raw_decode_ms=%.4f\n",argv[i],j,b-a,d-b,e-d,raw);
+  {IStream *saved=jpeg.input_stream;double begin;
+   jpeg.input_stream=NULL;begin=stamp();
+   bitmap=fyto_jpeg_preview(&jpeg,2048,&w,&h);wic=stamp()-begin;
+   jpeg.input_stream=saved;
+   if(!bitmap)return 7;DeleteObject(bitmap);
+  }
+  printf("JPEG_STAGE file=%ls round=%d metadata_ms=%.4f orientation_ms=%.4f turbo_decode_ms=%.4f raw_decode_ms=%.4f wic_ms=%.4f\n",argv[i],j,b-a,d-b,e-d,raw,wic);
   fyto_wic_close(&jpeg);stream->lpVtbl->Release(stream);
  }
  CoUninitialize();return 0;
