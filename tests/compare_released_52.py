@@ -2,7 +2,9 @@
 import os,sys,json,time,subprocess,hashlib,random,math,atexit,ctypes as c,ctypes.wintypes as w
 from pathlib import Path
 from PIL import Image,ImageDraw
-from window_test_helpers import u,g,wins,label
+from window_test_helpers import u,g,wins,label,BI
+g.BitBlt.argtypes=[w.HDC,c.c_int,c.c_int,c.c_int,c.c_int,w.HDC,c.c_int,c.c_int,w.DWORD]
+g.BitBlt.restype=w.BOOL
 if os.getenv('GITHUB_ACTIONS')!='true':raise SystemExit('Isolated CI only; never run on user desktop')
 root=Path(__file__).resolve().parents[1];out=root/'build/compare52';out.mkdir(parents=True,exist_ok=True)
 fixtures=out/'photos';fixtures.mkdir(exist_ok=True)
@@ -35,20 +37,24 @@ def pixel_ready(h,index):
     if f'{index:03}.jpg' not in label(h):return False
     r=w.RECT();u.GetClientRect(h,c.byref(r))
     origin=w.POINT(0,0);assert u.ClientToScreen(h,c.byref(origin))
-    dc=u.GetDC(None)
+    dc=u.GetDC(None);mem=g.CreateCompatibleDC(dc)
+    bitmap=g.CreateCompatibleBitmap(dc,1,r.bottom);old=g.SelectObject(mem,bitmap)
     try:
-        expected=colors[index]
-        # Trial chrome may offset the picture vertically. Verify the unique
-        # target marker in actual pixels, using the identical scan for all apps.
-        matches=0
+        assert g.BitBlt(mem,0,0,1,r.bottom,dc,origin.x+r.right//2,origin.y,0x00CC0020)
+        g.SelectObject(mem,old)
+        bi=BI();bi.size=c.sizeof(BI);bi.width=1;bi.height=-r.bottom;bi.planes=1;bi.bits=32
+        pixels=(c.c_ubyte*(r.bottom*4))()
+        assert g.GetDIBits(mem,bitmap,0,r.bottom,pixels,c.byref(bi),0)
+        expected=colors[index];matches=0
         for i in range(8,57):
-            value=g.GetPixel(dc,origin.x+r.right//2,origin.y+int(r.bottom*i/64))
-            actual=(value&255,(value>>8)&255,(value>>16)&255)
+            offset=int(r.bottom*i/64)*4
+            actual=(pixels[offset+2],pixels[offset+1],pixels[offset])
             if max(abs(a-b) for a,b in zip(actual,expected))<=14:
                 matches+=1
                 if matches>=3:return True
         return False
-    finally:u.ReleaseDC(None,dc)
+    finally:
+        g.SelectObject(mem,old);g.DeleteObject(bitmap);g.DeleteDC(mem);u.ReleaseDC(None,dc)
 def percentile(xs,p):return sorted(xs)[max(0,math.ceil(len(xs)*p)-1)]
 runs=[]
 errors=[]
