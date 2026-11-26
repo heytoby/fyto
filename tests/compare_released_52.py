@@ -8,7 +8,9 @@ root=Path(__file__).resolve().parents[1];out=root/'build/compare52';out.mkdir(pa
 fixtures=out/'photos';fixtures.mkdir(exist_ok=True)
 colors=[];manifest=[]
 for i in range(24):
-    color=(30+(i*61)%190,30+(i*97)%190,30+(i*43)%190);colors.append(color)
+    color=(40+(i*61)%180,70+(i*97)%150,40+(i*43)%190)
+    if max(color)-min(color)<50:color=(240,color[1],40)
+    colors.append(color)
     rng=random.Random(52000+i)
     im=Image.frombytes('RGB',(1500,1000),rng.randbytes(1500*1000*3)).resize((6000,4000),Image.Resampling.BICUBIC)
     draw=ImageDraw.Draw(im)
@@ -32,25 +34,26 @@ def wait(fn,seconds=20):
 def pixel_ready(h,index):
     if f'{index:03}.jpg' not in label(h):return False
     r=w.RECT();u.GetClientRect(h,c.byref(r))
-    dc=u.GetDC(h)
+    origin=w.POINT(0,0);assert u.ClientToScreen(h,c.byref(origin))
+    dc=u.GetDC(None)
     try:
         expected=colors[index]
         # Trial chrome may offset the picture vertically. Verify the unique
         # target marker in actual pixels, using the identical scan for all apps.
         matches=0
         for i in range(8,57):
-            value=g.GetPixel(dc,r.right//2,int(r.bottom*i/64))
+            value=g.GetPixel(dc,origin.x+r.right//2,origin.y+int(r.bottom*i/64))
             actual=(value&255,(value>>8)&255,(value>>16)&255)
             if max(abs(a-b) for a,b in zip(actual,expected))<=14:
                 matches+=1
                 if matches>=3:return True
         return False
-    finally:u.ReleaseDC(h,dc)
+    finally:u.ReleaseDC(None,dc)
 def percentile(xs,p):return sorted(xs)[max(0,math.ceil(len(xs)*p)-1)]
 runs=[]
 errors=[]
 def save_results():
-    (out/'results.json').write_text(json.dumps({'scope':'Exact released fyto binaries and official unlicensed BandiView trial on the same CI desktop, OS cache warm; complex 24MP JPEGs; first correct target pixels, not full-detail, real photos or physical scanout','display':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':manifest,'runs':runs,'errors':errors,'vendor_version':os.getenv('FYTO_BANDIVIEW_VERSION')},indent=2))
+    (out/'results.json').write_text(json.dumps({'scope':'Exact released fyto binaries and official unlicensed BandiView trial on the same CI desktop, OS cache warm; complex 24MP JPEGs; composited-screen correct target pixels, not full-detail, real photos or physical scanout','display':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':manifest,'runs':runs,'errors':errors,'vendor_version':os.getenv('FYTO_BANDIVIEW_VERSION')},indent=2))
 atexit.register(save_results)
 def record_error(t,v,tb):
     errors.append(str(v));save_results();sys.__excepthook__(t,v,tb)
