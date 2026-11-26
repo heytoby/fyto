@@ -1,7 +1,7 @@
 name: Compare fyto with BandiView
 on:
   push:
-    branches: ['perf/fyto-52-comparison']
+    branches: ['perf/diagnostics-only']
 permissions:
   contents: read
 jobs:

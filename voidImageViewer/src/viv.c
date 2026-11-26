@@ -752,7 +752,7 @@ static struct {
     WIN32_FIND_DATA file;
     _viv_preview_t image;
     unsigned used;
-} _viv_recent_previews[8];
+} _viv_recent_previews[64];
 static unsigned _viv_recent_preview_slot;
 typedef struct _viv_directory_s
 {
@@ -2113,7 +2113,7 @@ static void _viv_mipmap_free(_viv_mipmap_t *mipmap)
 // reach ~736 MB (3x128 MB of frames plus 96 MB of previews plus 256 MB of
 // render slots) while the comment claimed 224 MB. Everything is charged to this
 // one number now and the cheapest entry is evicted when it is exceeded.
-#define FYTO_CACHE_TOTAL_BYTES (384ull * 1024 * 1024)
+#define FYTO_CACHE_TOTAL_BYTES (128ull * 1024 * 1024)
 
 // Pixels of one frame plus its whole mipmap chain: each halving costs a quarter
 // of the level above, so the chain is about 4/3 of the frame. Pure: safe to

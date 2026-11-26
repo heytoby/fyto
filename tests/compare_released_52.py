@@ -2,6 +2,7 @@
 import os,sys,json,time,subprocess,hashlib,random,math,atexit,ctypes as c,ctypes.wintypes as w
 from pathlib import Path
 from PIL import Image,ImageDraw
+from process_resources import process_resources
 from window_test_helpers import u,g,wins,label,BI
 g.BitBlt.argtypes=[w.HDC,c.c_int,c.c_int,c.c_int,c.c_int,w.HDC,c.c_int,c.c_int,w.DWORD]
 g.BitBlt.restype=w.BOOL
@@ -64,7 +65,7 @@ atexit.register(save_results)
 def record_error(t,v,tb):
     errors.append(str(v));save_results();sys.__excepthook__(t,v,tb)
 sys.excepthook=record_error
-for order,version in enumerate(['52','71','bandiview','bandiview','71','52']):
+for order,version in enumerate(['52','71','bandiview','72','72','71','52']):
     vendor=version=='bandiview'
     folder=Path(os.environ['FYTO_BANDIVIEW_DIR']) if vendor else root/'build'/('released-'+version)
     candidates=list(folder.rglob('BandiView.exe' if vendor else 'fyto.exe'));assert len(candidates)==1,candidates
@@ -99,6 +100,7 @@ for order,version in enumerate(['52','71','bandiview','bandiview','71','52']):
             values=[s['ms'] for s in samples if s['phase']==phase]
             phases[phase]={'n':len(values),'p50_ms':percentile(values,.5),'p95_ms':percentile(values,.95),'max_ms':max(values)}
         run={'version':version,'order':order,'startup_ms':startup,'exe_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'samples':samples,'phases':phases}
+        run['resources']=process_resources(p.pid)
         runs.append(run);print(json.dumps({k:v for k,v in run.items() if k!='samples'}),flush=True)
     finally:
         if h:u.PostMessageW(h,0x10,0,0)
@@ -106,3 +108,18 @@ for order,version in enumerate(['52','71','bandiview','bandiview','71','52']):
             try:p.wait(timeout=8)
             except subprocess.TimeoutExpired:p.kill();p.wait()
     (out/'results.json').write_text(json.dumps({'scope':'Exact released binaries, same runner, OS file cache warm, 24 complex 24MP local JPEGs, ABBA order; first correct target pixels, not full-resolution detail or physical scanout','display':[u.GetSystemMetrics(0),u.GetSystemMetrics(1)],'fixtures':manifest,'runs':runs},indent=2))
+
+# Gates cover revisiting this working set; first-seen decode is disclosed separately.
+candidate=[r for r in runs if r['version']=='72']
+baseline=[r for r in runs if r['version']=='71']
+vendor=[r for r in runs if r['version']=='bandiview']
+assert len(candidate)==2 and len(baseline)==2 and len(vendor)==1
+for phase in ['reverse-120ms-pacing','continuous']:
+    current=max(r['phases'][phase]['p95_ms'] for r in candidate)
+    old=max(r['phases'][phase]['p95_ms'] for r in baseline)
+    reference=max(r['phases'][phase]['p95_ms'] for r in vendor)
+    assert current<=old*.70,(phase,'regression versus 71',current,old)
+    assert current<=reference*1.2+20,(phase,'vendor gap persists',current,reference)
+for run in candidate:
+    assert run['resources']['private_commit_peak_MiB']<=256,run['resources']
+print('Candidate working-set performance and native memory gates passed',flush=True)

@@ -2,7 +2,7 @@ name: Package fyto for Windows and macOS
 
 on:
   push:
-    branches: ['build/fyto-*']
+    branches: ['build/fyto-*', 'perf/fyto-52-comparison']
   workflow_dispatch:
   workflow_call:
 
@@ -37,6 +37,54 @@ jobs:
         if: ${{ !cancelled() && steps.build.conclusion == 'success' }}
         shell: pwsh
         run: python tests/audit_extended.py
+      - name: Download and extract exact releases without installing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($v in @('52','71')){
+            $tag=if($v -eq '52'){'v1.0.0.52'}else{'v1.0.0.72-rc.1'}
+            $expected=if($v -eq '52'){'71e5b1694ff11cacc11f102bc5de03f94b30826143b62a04bcb994cfd1485baf'}else{'c1e8ce4a1422aa369a797c16d86247b41e8173fe52ed0269493fcbfea71f5f69'}
+            $msi=Join-Path $env:RUNNER_TEMP "fyto-$v.msi"
+            Invoke-WebRequest "https://github.com/heytoby/fyto/releases/download/$tag/fyto-Setup-1.0.0.$v.msi" -OutFile $msi
+            if((Get-FileHash $msi).Hash.ToLowerInvariant() -ne $expected){throw 'Released MSI digest mismatch'}
+            $target=Join-Path $pwd "build/released-$v"
+            $p=Start-Process msiexec.exe -ArgumentList "/a `"$msi`" /qn TARGETDIR=`"$target`"" -WindowStyle Hidden -Wait -PassThru
+            if($p.ExitCode -ne 0){throw 'MSI extraction failed'}
+            $exe=@(Get-ChildItem $target -Filter fyto.exe -Recurse)
+            if($exe.Count -ne 1 -or $exe[0].VersionInfo.FileVersion -ne "1.0.0.$v"){throw 'Extracted viewer version mismatch'}
+          }
+          python -m pip install --quiet pillow
+          if($LASTEXITCODE){throw 'Pillow installation failed'}
+      - name: Prepare official BandiView trial on isolated runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $setup=Join-Path $env:RUNNER_TEMP 'bandiview-setup.exe'
+          Invoke-WebRequest 'https://bandisoft.app/bandiview/BANDIVIEW-SETUP-X64.EXE?20261103091858' -OutFile $setup
+          $sig=Get-AuthenticodeSignature $setup
+          if($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Bandisoft'){throw 'Vendor signature validation failed'}
+          $target=Join-Path $env:RUNNER_TEMP 'bandiview-compare'
+          $p=Start-Process $setup -ArgumentList "/S /D:`"$target`"" -WindowStyle Hidden -Wait -PassThru
+          if($p.ExitCode -ne 0){throw 'Vendor silent install failed'}
+          if(!(Test-Path "$target/BandiView.exe")){throw 'Vendor executable missing'}
+          "FYTO_BANDIVIEW_DIR=$target" >> $env:GITHUB_ENV
+          "FYTO_BANDIVIEW_VERSION=$((Get-Item "$target/BandiView.exe").VersionInfo.FileVersion)" >> $env:GITHUB_ENV
+          Get-FileHash $setup
+      - name: Prepare candidate viewer for exact-binary comparison
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build/released-72 | Out-Null
+          Copy-Item build/payload/fyto.exe build/released-72/fyto.exe
+      - name: Gate 24-photo revisit performance against 71 and BandiView
+        shell: pwsh
+        run: python tests/compare_released_52.py
+      - name: Preserve performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fyto-72-performance
+          path: build/compare52/results.json
+          if-no-files-found: warn
       - name: Preserve raw audit evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4
@@ -108,7 +156,7 @@ jobs:
   deliver:
     name: Publish downloadable test build
     needs: [windows, macos]
-    if: github.ref == 'refs/heads/build/fyto-audit-20261122' && startsWith(github.event.head_commit.message, 'deliver:')
+    if: github.ref == 'refs/heads/perf/fyto-52-comparison' && startsWith(github.event.head_commit.message, 'deliver:')
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -129,32 +177,32 @@ jobs:
         run: |
           set -euo pipefail
           cd delivery
-          test -s fyto-Setup-1.0.0.71.exe
-          test -s fyto-Setup-1.0.0.71.msi
-          test -s fyto-1.0.0.71-macos-universal.dmg
+          test -s fyto-Setup-1.0.0.72.exe
+          test -s fyto-Setup-1.0.0.72.msi
+          test -s fyto-1.0.0.72-macos-universal.dmg
           sed -i 's/\r$//' SHA256SUMS.txt
           sha256sum -c SHA256SUMS.txt
-          sha256sum fyto-Setup-1.0.0.71.exe fyto-Setup-1.0.0.71.msi fyto-1.0.0.71-macos-universal.dmg > DELIVERY-SHA256SUMS.txt
+          sha256sum fyto-Setup-1.0.0.72.exe fyto-Setup-1.0.0.72.msi fyto-1.0.0.72-macos-universal.dmg > DELIVERY-SHA256SUMS.txt
           cat > RELEASE-NOTES.txt <<'NOTES'
-          fyto 1.0.0.71 测试版
+          fyto 1.0.0.72 测试版
 
           Windows EXE/MSI 支持覆盖旧版安装；macOS 提供通用 DMG。
-          本版包含浏览调度、导航顺序、文件缓存、混合格式内存峰值、JPEG/TIFF流式读取、ICC取消、ICO及默认关联识别修复。
+          本版修复预览只保留8张导致较大图片组回看反复解码的问题：预览槽扩展至64，总缓存预算从384MiB收紧至128MiB。发布须额外通过与71版和BandiView同图对比及256MiB原生私有提交峰值检查。首次读取复杂JPEG的解码耗时仍待优化，不宣称全部速度问题已解决。
           发布前必须通过 Windows/macOS 构建、Windows 安装检查和36项后台验收，检查失败不会发布。
 
           本版为测试交付。高分辨率、多显示器/DPI、真实照片、打印/旋转、实际系统关联及应用内更新等完整实机矩阵仍未验收。
           主显示器、鼠标和用户本机安装未被操作。此测试版不替换稳定版更新通道。
           NOTES
-          tag='v1.0.0.71-rc.1'
+          tag='v1.0.0.72-rc.1'
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'This test release already exists; refusing to replace published files.' >&2
             exit 1
           fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
-            --title 'fyto 1.0.0.71 测试版' --notes-file RELEASE-NOTES.txt \
-            fyto-Setup-1.0.0.71.exe fyto-Setup-1.0.0.71.msi fyto-Setup-1.0.0.71.zip fyto-source-1.0.0.71.zip \
-            fyto-1.0.0.71-macos-universal.dmg fyto-1.0.0.71-macos-universal.zip DELIVERY-SHA256SUMS.txt
-          for file in fyto-Setup-1.0.0.71.exe fyto-Setup-1.0.0.71.msi fyto-1.0.0.71-macos-universal.dmg; do
+            --title 'fyto 1.0.0.72 测试版' --notes-file RELEASE-NOTES.txt \
+            fyto-Setup-1.0.0.72.exe fyto-Setup-1.0.0.72.msi fyto-Setup-1.0.0.72.zip fyto-source-1.0.0.72.zip \
+            fyto-1.0.0.72-macos-universal.dmg fyto-1.0.0.72-macos-universal.zip DELIVERY-SHA256SUMS.txt
+          for file in fyto-Setup-1.0.0.72.exe fyto-Setup-1.0.0.72.msi fyto-1.0.0.72-macos-universal.dmg; do
             curl --head --fail --silent --show-error --location --retry 3 --retry-delay 2 --retry-all-errors \
               --connect-timeout 10 --max-time 30 "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$file" >/dev/null
           done
