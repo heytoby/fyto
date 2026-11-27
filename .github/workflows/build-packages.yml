@@ -42,7 +42,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           foreach($v in @('52','71')){
-            $tag=if($v -eq '52'){'v1.0.0.52'}else{'v1.0.0.72-rc.1'}
+            $tag=if($v -eq '52'){'v1.0.0.52'}else{'v1.0.0.71-rc.1'}
             $expected=if($v -eq '52'){'71e5b1694ff11cacc11f102bc5de03f94b30826143b62a04bcb994cfd1485baf'}else{'c1e8ce4a1422aa369a797c16d86247b41e8173fe52ed0269493fcbfea71f5f69'}
             $msi=Join-Path $env:RUNNER_TEMP "fyto-$v.msi"
             Invoke-WebRequest "https://github.com/heytoby/fyto/releases/download/$tag/fyto-Setup-1.0.0.$v.msi" -OutFile $msi
