@@ -2113,7 +2113,8 @@ static void _viv_mipmap_free(_viv_mipmap_t *mipmap)
 // reach ~736 MB (3x128 MB of frames plus 96 MB of previews plus 256 MB of
 // render slots) while the comment claimed 224 MB. Everything is charged to this
 // one number now and the cheapest entry is evicted when it is exceeded.
-#define FYTO_CACHE_TOTAL_BYTES (128ull * 1024 * 1024)
+#define FYTO_CACHE_TOTAL_BYTES (384ull * 1024 * 1024)
+#define FYTO_RECENT_PREVIEW_BYTES (128ull * 1024 * 1024)
 
 // Pixels of one frame plus its whole mipmap chain: each halving costs a quarter
 // of the level above, so the chain is about 4/3 of the frame. Pure: safe to
@@ -16620,6 +16621,30 @@ static void _viv_remember_preview(_viv_preview_t preview)
        already exceeded. */
     while (_viv_cache_footprint() > FYTO_CACHE_TOTAL_BYTES && _viv_cache_evict_one(FALSE))
         ;
+    /* Bound the expanded history independently. The global frame budget also
+       reserves the current full-resolution frame and its render bitmap; using
+       the history cap there can suppress that render and retain the original
+       through the next decode. */
+    for (;;)
+    {
+        UINT64 bytes = 0;
+        unsigned victim = ARRAYSIZE(_viv_recent_previews), age = ~0u;
+        for (i = 0; i < ARRAYSIZE(_viv_recent_previews); ++i)
+        {
+            _viv_preview_t *image = &_viv_recent_previews[i].image;
+            if (!image->hbitmap) continue;
+            bytes += (UINT64)image->wide * image->high * 4;
+            if (_viv_recent_previews[i].used < age)
+            {
+                age = _viv_recent_previews[i].used;
+                victim = i;
+            }
+        }
+        if (bytes <= FYTO_RECENT_PREVIEW_BYTES || victim == ARRAYSIZE(_viv_recent_previews)) break;
+        DeleteObject(_viv_recent_previews[victim].image.hbitmap);
+        _viv_recent_previews[victim].image.hbitmap = NULL;
+    }
+
 }
 
 // Keep a small, already rendered bitmap when the full image will be freed.
